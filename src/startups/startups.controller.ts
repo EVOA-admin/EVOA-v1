@@ -4,12 +4,14 @@ import { StartupsService } from './startups.service';
 import { AiService } from '../ai/ai.service';
 import { SupabaseAuthGuard } from '../auth/guards/supabase-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import { User } from '../users/entities/user.entity';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { User, UserRole } from '../users/entities/user.entity';
 import { CreateStartupDto } from './dto/create-startup.dto';
 
 @ApiTags('Startups')
 @Controller('startups')
-@UseGuards(SupabaseAuthGuard)
+@UseGuards(SupabaseAuthGuard, RolesGuard)
 @ApiBearerAuth()
 export class StartupsController {
     constructor(
@@ -18,6 +20,7 @@ export class StartupsController {
     ) { }
 
     @Post()
+    @Roles(UserRole.STARTUP)
     @ApiOperation({ summary: 'Create a startup profile' })
     @ApiResponse({ status: 201, description: 'Startup created successfully' })
     @ApiResponse({ status: 409, description: 'Username already taken' })
@@ -33,6 +36,7 @@ export class StartupsController {
     }
 
     @Post('my/publish-reel')
+    @Roles(UserRole.STARTUP)
     @ApiOperation({ summary: 'Publish or re-publish pitch video as a Reel' })
     @ApiResponse({ status: 201, description: 'Pitch reel published/updated' })
     async publishPitchReel(@CurrentUser() user: User) {
@@ -60,15 +64,13 @@ export class StartupsController {
     }
 
     @Post(':id/analyze')
+    @Roles(UserRole.INVESTOR, UserRole.INCUBATOR)
     @ApiOperation({ summary: 'Ask AI Analyst a question about the startup' })
     async analyzeStartup(
         @Param('id') startupId: string,
         @CurrentUser() user: User,
         @Body() body: { question: string }
     ) {
-        if (user.role !== 'investor' && user.role !== 'incubator') {
-            throw new ForbiddenException('Only investors can directly access the AI Analyst');
-        }
         return this.aiService.analyzeStartup(startupId, user.id, body.question);
     }
 
@@ -86,6 +88,7 @@ export class StartupsController {
     }
 
     @Patch(':id')
+    @Roles(UserRole.STARTUP)
     @ApiOperation({ summary: 'Update startup (founder only)' })
     @ApiResponse({ status: 200, description: 'Startup updated successfully' })
     async updateStartup(@Param('id') startupId: string, @CurrentUser() user: User, @Body() dto: any) {

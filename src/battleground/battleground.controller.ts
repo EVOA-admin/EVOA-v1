@@ -2,14 +2,16 @@ import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { SupabaseAuthGuard } from '../auth/guards/supabase-auth.guard';
 import { BattlegroundService } from './battleground.service';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { RolesGuard } from '../auth/guards/roles.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import { User } from '../users/entities/user.entity';
+import { User, UserRole } from '../users/entities/user.entity';
 import { VerifyBattlegroundPaymentDto } from './dto/verify-battleground-payment.dto';
 import { MarkBattlegroundPaymentFailedDto } from './dto/mark-battleground-payment-failed.dto';
 
 @ApiTags('Battleground')
 @Controller('battleground')
-@UseGuards(SupabaseAuthGuard)
+@UseGuards(SupabaseAuthGuard, RolesGuard)
 @ApiBearerAuth()
 export class BattlegroundController {
     constructor(private readonly battlegroundService: BattlegroundService) { }
@@ -21,6 +23,7 @@ export class BattlegroundController {
     }
 
     @Post('create-order')
+    @Roles(UserRole.STARTUP)
     @ApiOperation({ summary: 'Create battleground participation payment order' })
     createOrder(@CurrentUser() user: User) {
         return this.battlegroundService.createOrder(user);
@@ -39,6 +42,7 @@ export class BattlegroundController {
     }
 
     @Post('select-pitch/:reelId')
+    @Roles(UserRole.STARTUP)
     @ApiOperation({ summary: 'Select a startup pitch for Battleground participation' })
     selectPitch(@CurrentUser() user: User, @Param('reelId') reelId: string) {
         return this.battlegroundService.selectPitch(user, reelId);

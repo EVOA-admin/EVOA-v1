@@ -3,17 +3,20 @@ import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@ne
 import { ReelsService } from './reels.service';
 import { SupabaseAuthGuard } from '../auth/guards/supabase-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import { User } from '../users/entities/user.entity';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { User, UserRole } from '../users/entities/user.entity';
 import { FeedQueryDto, CreateCommentDto, ShareReelDto, CreateReelDto } from './dto/reels.dto';
 
 @ApiTags('Reels')
 @Controller('reels')
-@UseGuards(SupabaseAuthGuard)
+@UseGuards(SupabaseAuthGuard, RolesGuard)
 @ApiBearerAuth()
 export class ReelsController {
     constructor(private readonly reelsService: ReelsService) { }
 
     @Post()
+    @Roles(UserRole.STARTUP)
     @ApiOperation({ summary: 'Create a reel (publish pitch video to feed)' })
     @ApiResponse({ status: 201, description: 'Reel created/updated' })
     async createReel(@CurrentUser() user: User, @Body() dto: CreateReelDto) {
@@ -55,7 +58,7 @@ export class ReelsController {
     }
 
     @Delete(':id')
-
+    @Roles(UserRole.STARTUP)
     @ApiOperation({ summary: "Delete a reel — only the startup founder can delete their own reel" })
     async deleteReel(@Param('id') reelId: string, @CurrentUser() user: User) {
         return this.reelsService.deleteReel(reelId, user.id);

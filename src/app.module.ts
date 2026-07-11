@@ -1,7 +1,8 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { ThrottlerModule } from '@nestjs/throttler';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { APP_GUARD } from '@nestjs/core';
 import { dataSourceOptions } from './config/database.config';
 import { validate } from './config/env.validation';
 import { RedisModule } from './config/redis.module';
@@ -60,6 +61,12 @@ import { AdminModule } from './admin/admin.module';
         PricingModule,
         BattlegroundModule,
         AdminModule,
+    ],
+    providers: [
+        {
+            provide: APP_GUARD,
+            useClass: ThrottlerGuard,
+        },
     ],
 })
 export class AppModule { }
