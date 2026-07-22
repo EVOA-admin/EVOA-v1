@@ -220,11 +220,18 @@ export class ReelsService {
         const { cursor, limit = 20 } = query;
         const cacheKey = `feed:following:${userId}:${cursor || 'start'}:${limit}`;
 
-        // Try cache first
-        const cached = await this.redisService.get(cacheKey);
-        if (cached) {
-            return JSON.parse(cached);
-        }
+        // Try cache first — but never let Redis errors crash the feed,
+        // and never serve a cached empty result (prevents empty-result poisoning).
+        try {
+            const cached = await this.redisService.get(cacheKey);
+            if (cached) {
+                const parsed = JSON.parse(cached);
+                // Only use cache if it contains actual reels.
+                // An empty cached response would permanently block the feed
+                // until TTL expiry, making it appear as if no pitches exist.
+                if (parsed?.reels?.length > 0) return parsed;
+            }
+        } catch (_) { /* Redis unavailable — proceed to DB */ }
 
         // Get followed startup IDs
         const follows = await this.followRepository.find({
@@ -609,24 +616,25 @@ export class ReelsService {
     /**
      * Wipe ALL users' for_you feed caches so a newly published reel
      * appears immediately in the public feed without waiting for TTL expiry.
+     *
+     * Uses redis v4 client API — scan(cursor, { MATCH, COUNT }) returning { cursor, keys }.
+     * (The previous v3 positional-argument API was silently throwing, preventing
+     * cache invalidation after new reel publish/delete.)
      */
     private async invalidateAllForYouCaches() {
         try {
             if (!this.redisClient) return;
-            let cursor = '0';
+            let cursor = 0;
             do {
-                const [nextCursor, keys] = await this.redisClient.scan(
-                    cursor,
-                    'MATCH',
-                    'feed:for_you:*',
-                    'COUNT',
-                    200,
-                );
-                cursor = nextCursor;
-                if (keys.length > 0) {
-                    await this.redisClient.del(...keys);
+                const result = await this.redisClient.scan(cursor, {
+                    MATCH: 'feed:for_you:*',
+                    COUNT: 200,
+                });
+                cursor = result.cursor;
+                if (result.keys.length > 0) {
+                    await this.redisClient.del(result.keys);
                 }
-            } while (cursor !== '0');
+            } while (cursor !== 0);
         } catch (err) {
             console.error('[ReelsService] Global feed cache flush error:', err);
         }

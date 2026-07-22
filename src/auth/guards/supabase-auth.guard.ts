@@ -5,6 +5,76 @@ import { getSupabaseAdmin } from '../../config/supabase.config';
 import { User, UserRole } from '../../users/entities/user.entity';
 import { isAdminEmail } from '../../users/admin-identity.util';
 
+// ──────────────────────────────────────────────────────────────────────────────
+// In-memory JWT verification cache
+//
+// Problem solved: every API call previously triggered an external HTTPS round-
+// trip to Supabase (~100-500 ms) to verify the JWT. On page load, 4 parallel
+// requests fired simultaneously. With a DB pool of only 3 connections this
+// caused pool exhaustion -> timeout errors -> feed returned empty -> "No Pitches Yet".
+//
+// Fix: cache the verified identity (supabaseUserId, email) keyed by raw token,
+// respecting the token's own expiry. The DB user lookup still runs each request
+// (cheap, local) so any role/status changes take effect immediately.
+//
+// Bounds: max 2000 entries; expired entries are evicted before each lookup.
+// Never persisted across server restarts (in-memory only).
+// ──────────────────────────────────────────────────────────────────────────────
+interface CachedToken {
+    supabaseUserId: string;
+    email: string | undefined;
+    expiresAt: number; // Unix ms - 90 s before JWT exp for safety margin
+}
+
+const TOKEN_CACHE = new Map<string, CachedToken>();
+const TOKEN_CACHE_MAX = 2000;
+const TOKEN_CACHE_SAFETY_MARGIN_MS = 90_000; // evict 90 s before actual expiry
+
+function decodeJwtExp(token: string): number | null {
+    try {
+        const parts = token.split('.');
+        if (parts.length !== 3) return null;
+        const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf-8'));
+        return typeof payload.exp === 'number' ? payload.exp * 1000 : null; // s -> ms
+    } catch {
+        return null;
+    }
+}
+
+function evictExpiredTokens() {
+    const now = Date.now();
+    for (const [key, entry] of TOKEN_CACHE.entries()) {
+        if (entry.expiresAt <= now) TOKEN_CACHE.delete(key);
+    }
+}
+
+function getCachedToken(token: string): CachedToken | null {
+    evictExpiredTokens();
+    const entry = TOKEN_CACHE.get(token);
+    if (!entry || entry.expiresAt <= Date.now()) {
+        TOKEN_CACHE.delete(token);
+        return null;
+    }
+    return entry;
+}
+
+function setCachedToken(token: string, data: Omit<CachedToken, 'expiresAt'>, jwtExpMs: number | null) {
+    if (!jwtExpMs) return;
+    const expiresAt = jwtExpMs - TOKEN_CACHE_SAFETY_MARGIN_MS;
+    if (expiresAt <= Date.now()) return;
+
+    if (TOKEN_CACHE.size >= TOKEN_CACHE_MAX) {
+        evictExpiredTokens();
+        if (TOKEN_CACHE.size >= TOKEN_CACHE_MAX) {
+            // Still full - evict oldest half
+            const toDelete = [...TOKEN_CACHE.keys()].slice(0, Math.floor(TOKEN_CACHE_MAX / 2));
+            toDelete.forEach(k => TOKEN_CACHE.delete(k));
+        }
+    }
+
+    TOKEN_CACHE.set(token, { ...data, expiresAt });
+}
+
 @Injectable()
 export class SupabaseAuthGuard implements CanActivate {
     constructor(
@@ -21,36 +91,43 @@ export class SupabaseAuthGuard implements CanActivate {
         }
 
         try {
-            // Use service-role admin client — reliably verifies all Supabase JWTs
-            // including Google OAuth tokens signed with ES256
-            const adminClient = getSupabaseAdmin();
-            const { data, error } = await adminClient.auth.getUser(token);
+            // ── Step 1: Verify JWT identity (cached after first verification) ──
+            let supabaseUserId: string;
+            let email: string | undefined;
 
-            if (error || !data.user) {
-                console.error('[SupabaseAuthGuard] Token verification failed:', {
-                    supabaseError: error?.message,
-                    supabaseStatus: (error as any)?.status,
-                    tokenPrefix: token.substring(0, 20) + '...',
-                });
-                throw new UnauthorizedException('Invalid or expired token');
+            const cached = getCachedToken(token);
+            if (cached) {
+                // Cache hit - skip external Supabase round-trip
+                supabaseUserId = cached.supabaseUserId;
+                email = cached.email;
+            } else {
+                // Cache miss - verify with Supabase (external HTTP call)
+                const adminClient = getSupabaseAdmin();
+                const { data, error } = await adminClient.auth.getUser(token);
+
+                if (error || !data.user) {
+                    console.error('[SupabaseAuthGuard] Token verification failed:', {
+                        supabaseError: error?.message,
+                        supabaseStatus: (error as any)?.status,
+                        tokenPrefix: token.substring(0, 20) + '...',
+                    });
+                    throw new UnauthorizedException('Invalid or expired token');
+                }
+
+                supabaseUserId = data.user.id;
+                email = data.user.email;
+
+                // Cache for future requests within this token's lifetime
+                const jwtExpMs = decodeJwtExp(token);
+                setCachedToken(token, { supabaseUserId, email }, jwtExpMs);
             }
 
-            // Find or link user in database
-            const { id: supabaseUserId, email } = data.user;
+            // ── Step 2: Find or link user in database (always runs - catches role/status changes) ──
+            let user = await this.userRepository.findOne({ where: { supabaseUserId } });
 
-            // 1. Try to find by Supabase ID
-            let user = await this.userRepository.findOne({
-                where: { supabaseUserId },
-            });
-
-            // 2. If not found by ID, try finding by email (for users previously registered or manually added)
             if (!user && email) {
-                user = await this.userRepository.findOne({
-                    where: { email },
-                });
-
+                user = await this.userRepository.findOne({ where: { email } });
                 if (user) {
-                    // Link existing user record to new Supabase ID
                     user.supabaseUserId = supabaseUserId;
                     await this.userRepository.save(user);
                 }
@@ -58,12 +135,10 @@ export class SupabaseAuthGuard implements CanActivate {
 
             const shouldForceAdmin = isAdminEmail(email);
 
-            // 3. If still not found, create a new user record
             if (!user) {
                 user = this.userRepository.create({
                     email,
-                    fullName: data.user.user_metadata?.full_name || data.user.user_metadata?.name || email?.split('@')[0] || '',
-                    avatarUrl: data.user.user_metadata?.avatar_url,
+                    fullName: '',
                     supabaseUserId,
                     role: shouldForceAdmin ? UserRole.ADMIN : UserRole.VIEWER,
                     roleSelected: shouldForceAdmin,
@@ -92,7 +167,7 @@ export class SupabaseAuthGuard implements CanActivate {
 
             // Attach user to request
             request.user = user;
-            request.supabaseUser = data.user;
+            request.supabaseUser = { id: supabaseUserId, email };
 
             return true;
         } catch (error) {
