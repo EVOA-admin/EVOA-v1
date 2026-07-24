@@ -417,4 +417,91 @@ export class PricingService {
             subscriptionEndDate,
         };
     }
+    /**
+     * Create a Razorpay order specifically for the EVOA × PitchIn 180 Seconds event bundle.
+     * Price: ₹999 (99900 paise). Activates 1-month startup_pro premium on payment success.
+     * Reuses the startup_pro plan type to avoid any database enum migration.
+     * Unlike createOrder(), this does NOT block users who already have an active subscription
+     * because they may legitimately want the event ticket independently.
+     */
+    async createEventOrder(user: User) {
+        const freshUser = await this.getFreshUser(user.id);
+
+        if (freshUser.role !== UserRole.STARTUP) {
+            throw new ForbiddenException('Only Startup accounts can purchase the event bundle.');
+        }
+
+        const plan: PlanConfig = {
+            amountPaise: 99900, // ₹999
+            role: UserRole.STARTUP,
+            planType: UserPlanType.STARTUP_PRO,
+            name: 'EVOA × PitchIn 180 Seconds Bundle',
+        };
+
+        // Check for an existing pending event order to avoid duplicate charges
+        const existingPending = await this.pricingOrderRepository.findOne({
+            where: {
+                userId: freshUser.id,
+                planType: plan.planType,
+                subscriptionStatus: SubscriptionStatus.PENDING,
+            },
+            order: { createdAt: 'DESC' },
+        });
+
+        if (existingPending?.razorpayOrderId) {
+            return {
+                orderId: existingPending.razorpayOrderId,
+                amount: existingPending.amountPaise,
+                currency: existingPending.currency,
+                planType: 'startup_pro',
+                planName: plan.name,
+                razorpayKey: this.razorpayKeyId,
+                subscriptionStatus: SubscriptionStatus.PENDING,
+            };
+        }
+
+        const receipt = this.generateReceipt('startup_pro', freshUser.id);
+        const razorpayOrder = await this.createRazorpayOrder(
+            plan.amountPaise,
+            receipt,
+            freshUser.id,
+            'startup_pro',
+        );
+
+        const order = this.pricingOrderRepository.create({
+            userId: freshUser.id,
+            planType: plan.planType,
+            razorpayOrderId: razorpayOrder.id,
+            paymentId: null,
+            amountPaise: plan.amountPaise,
+            currency: 'INR',
+            subscriptionStatus: SubscriptionStatus.PENDING,
+            providerSignature: null,
+            verifiedAt: null,
+        });
+
+        await this.pricingOrderRepository.save(order);
+
+        await this.userRepository.update(
+            { id: freshUser.id },
+            {
+                isPremium: false,
+                planType: plan.planType,
+                subscriptionStatus: SubscriptionStatus.PENDING,
+                subscriptionStartDate: null,
+                subscriptionEndDate: null,
+                isPaymentPending: false,
+            },
+        );
+
+        return {
+            orderId: razorpayOrder.id,
+            planType: 'startup_pro',
+            amount: plan.amountPaise,
+            currency: 'INR',
+            subscriptionStatus: SubscriptionStatus.PENDING,
+            razorpayKey: this.razorpayKeyId,
+            planName: plan.name,
+        };
+    }
 }

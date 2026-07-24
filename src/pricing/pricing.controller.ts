@@ -33,4 +33,12 @@ export class PricingController {
     verifyPayment(@CurrentUser() user: User, @Body() dto: VerifyPaymentDto) {
         return this.pricingService.verifyPayment(user, dto);
     }
+
+    @Post('create-event-order')
+    @UseGuards(SupabaseAuthGuard)
+    @ApiBearerAuth()
+    @ApiOperation({ summary: 'Create a ₹999 Razorpay order for the EVOA × PitchIn 180 Seconds event bundle' })
+    createEventOrder(@CurrentUser() user: User) {
+        return this.pricingService.createEventOrder(user);
+    }
 }

@@ -237,8 +237,15 @@ export class StartupsService {
             throw new NotFoundException('Startup not found');
         }
 
+        const isInvestor = viewer?.role === 'investor';
+        const isOwner = startup.founderId === viewerId;
+        if (!isInvestor && !isOwner) {
+            startup.pitchDeckUrl = null as any;
+        }
+
         return startup;
     }
+
 
     async getRankedStartups() {
         const startups = await this.startupRepository.find({

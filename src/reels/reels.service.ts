@@ -10,7 +10,7 @@ import { ReelView } from './entities/reel-view.entity';
 import { Follow } from '../startups/entities/follow.entity';
 import { Startup } from '../startups/entities/startup.entity';
 import { Notification, NotificationType } from '../notifications/entities/notification.entity';
-import { User } from '../users/entities/user.entity';
+import { User, UserRole } from '../users/entities/user.entity';
 import { RedisService } from '../config/redis.config';
 import { FeedQueryDto, CreateCommentDto, ShareReelDto, CreateReelDto } from './dto/reels.dto';
 import { assertInvestorPaymentAccess, hasActivePremiumAccess } from '../users/user-access.util';
@@ -121,6 +121,13 @@ export class ReelsService {
             relations: ['startup', 'startup.founder'],
         });
         if (!reel) throw new NotFoundException('Reel not found');
+
+        const isInvestor = viewer.role === UserRole.INVESTOR;
+        const isOwn = reel.startup?.founderId === _userId;
+        if (!isInvestor && !isOwn && reel.startup) {
+            reel.startup.pitchDeckUrl = null as any;
+        }
+
         return reel;
     }
 
@@ -141,6 +148,9 @@ export class ReelsService {
                 if (parsed?.reels?.length > 0) return parsed;
             }
         } catch (_) { /* Redis unavailable — proceed to DB */ }
+
+        const user = await this.getFreshUser(userId);
+        const isInvestor = user.role === UserRole.INVESTOR;
 
         // Build query with cursor-based pagination
         const queryBuilder = this.reelRepository
@@ -193,12 +203,20 @@ export class ReelsService {
         const followedStartupIds = new Set(userFollows.map(f => f.startupId));
 
         const result = {
-            reels: reels.map(reel => ({
-                ...reel,
-                isLiked: likedReelIds.has(reel.id),
-                isSaved: savedReelIds.has(reel.id),
-                isFollowing: followedStartupIds.has(reel.startupId),
-            })),
+            reels: reels.map(reel => {
+                const isOwn = reel.startup?.founderId === userId;
+                const canAccessDeck = isInvestor || isOwn;
+                return {
+                    ...reel,
+                    startup: reel.startup ? {
+                        ...reel.startup,
+                        pitchDeckUrl: canAccessDeck ? reel.startup.pitchDeckUrl : null,
+                    } : null,
+                    isLiked: likedReelIds.has(reel.id),
+                    isSaved: savedReelIds.has(reel.id),
+                    isFollowing: followedStartupIds.has(reel.startupId),
+                };
+            }),
             nextCursor,
             hasMore,
         };
@@ -227,11 +245,12 @@ export class ReelsService {
             if (cached) {
                 const parsed = JSON.parse(cached);
                 // Only use cache if it contains actual reels.
-                // An empty cached response would permanently block the feed
-                // until TTL expiry, making it appear as if no pitches exist.
                 if (parsed?.reels?.length > 0) return parsed;
             }
         } catch (_) { /* Redis unavailable — proceed to DB */ }
+
+        const user = await this.getFreshUser(userId);
+        const isInvestor = user.role === UserRole.INVESTOR;
 
         // Get followed startup IDs
         const follows = await this.followRepository.find({
@@ -278,25 +297,36 @@ export class ReelsService {
         const likedReelIds = new Set(userLikes.map(like => like.reelId));
 
         // Check if user saved each reel
-        // Check if user saved each reel
         const userSaves = await this.reelSaveRepository.find({
             where: { userId, reelId: In(reelIds) },
         });
         const savedReelIds = new Set(userSaves.map(save => save.reelId));
 
         const result = {
-            reels: reels.map(reel => ({
-                ...reel,
-                isLiked: likedReelIds.has(reel.id),
-                isSaved: savedReelIds.has(reel.id),
-                isFollowing: true,
-            })),
+            reels: reels.map(reel => {
+                const isOwn = reel.startup?.founderId === userId;
+                const canAccessDeck = isInvestor || isOwn;
+                return {
+                    ...reel,
+                    startup: reel.startup ? {
+                        ...reel.startup,
+                        pitchDeckUrl: canAccessDeck ? reel.startup.pitchDeckUrl : null,
+                    } : null,
+                    isLiked: likedReelIds.has(reel.id),
+                    isSaved: savedReelIds.has(reel.id),
+                    isFollowing: true,
+                };
+            }),
             nextCursor,
             hasMore,
         };
 
-        // Cache for 5 minutes
-        await this.redisService.set(cacheKey, JSON.stringify(result), 300);
+        // Cache for 1 minute — shorter TTL than for_you to limit stale-empty window.
+        if (result.reels.length > 0) {
+            try {
+                await this.redisService.set(cacheKey, JSON.stringify(result), 60);
+            } catch (_) { /* Redis unavailable — continue without caching */ }
+        }
 
         return result;
     }
@@ -614,27 +644,47 @@ export class ReelsService {
     }
 
     /**
-     * Wipe ALL users' for_you feed caches so a newly published reel
-     * appears immediately in the public feed without waiting for TTL expiry.
+     * Wipe ALL users' for_you AND following feed caches so a newly published reel
+     * appears immediately for every user — both on the For You page and on the
+     * Following feed of anyone who follows the uploader's startup.
+     *
+     * Root-cause fix for "No Pitches Yet" bug: the original implementation only
+     * cleared feed:for_you:* keys, leaving feed:following:* caches stale. A follower
+     * who already had a cached (possibly empty) following feed would not see the
+     * new pitch until the 5-minute TTL expired — or until backend restart flushed Redis.
      *
      * Uses redis v4 client API — scan(cursor, { MATCH, COUNT }) returning { cursor, keys }.
-     * (The previous v3 positional-argument API was silently throwing, preventing
-     * cache invalidation after new reel publish/delete.)
      */
     private async invalidateAllForYouCaches() {
         try {
             if (!this.redisClient) return;
-            let cursor = 0;
-            do {
-                const result = await this.redisClient.scan(cursor, {
-                    MATCH: 'feed:for_you:*',
-                    COUNT: 200,
-                });
-                cursor = result.cursor;
-                if (result.keys.length > 0) {
-                    await this.redisClient.del(result.keys);
-                }
-            } while (cursor !== 0);
+
+            // Fast-path: delete the most common first-page following keys directly
+            // (these are the keys most likely to be stale after a new pitch upload)
+            const commonKeys = [
+                // We can't enumerate all user IDs here, so rely on SCAN below.
+                // But we DO know the for_you first-page keys to bust immediately:
+            ];
+            if (commonKeys.length > 0) {
+                await this.redisClient.del(commonKeys).catch(() => { /* ignore */ });
+            }
+
+            // SCAN-based sweep for both feed types
+            const patterns = ['feed:for_you:*', 'feed:following:*'];
+
+            for (const pattern of patterns) {
+                let cursor = 0;
+                do {
+                    const result = await this.redisClient.scan(cursor, {
+                        MATCH: pattern,
+                        COUNT: 200,
+                    });
+                    cursor = result.cursor;
+                    if (result.keys.length > 0) {
+                        await this.redisClient.del(result.keys);
+                    }
+                } while (cursor !== 0);
+            }
         } catch (err) {
             console.error('[ReelsService] Global feed cache flush error:', err);
         }
