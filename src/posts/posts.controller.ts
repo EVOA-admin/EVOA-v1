@@ -8,7 +8,6 @@ import { CreatePostDto } from './dto/create-post.dto';
 
 @ApiTags('Posts')
 @Controller('posts')
-@UseGuards(SupabaseAuthGuard)
 @ApiBearerAuth()
 export class PostsController {
     constructor(private readonly postsService: PostsService) { }
@@ -16,11 +15,12 @@ export class PostsController {
     @Get()
     @ApiOperation({ summary: 'Get all recent posts — startup posts enriched with stats' })
     @ApiResponse({ status: 200, description: 'All posts' })
-    async getAllPosts(@CurrentUser() user: User) {
-        return this.postsService.getAllPosts(user.id);
+    async getAllPosts(@CurrentUser() user?: User) {
+        return this.postsService.getAllPosts(user?.id);
     }
 
     @Post()
+    @UseGuards(SupabaseAuthGuard)
     @ApiOperation({ summary: 'Create a new post (auto-links startup profile if posted by a startup)' })
     @ApiResponse({ status: 201, description: 'Post created successfully' })
     async createPost(@CurrentUser() user: User, @Body() dto: CreatePostDto) {
@@ -44,12 +44,14 @@ export class PostsController {
     }
 
     @Delete(':id')
+    @UseGuards(SupabaseAuthGuard)
     @ApiOperation({ summary: 'Delete own post (soft delete)' })
     async deletePost(@Param('id') postId: string, @CurrentUser() user: User) {
         return this.postsService.deletePost(postId, user.id);
     }
 
     @Get('me')
+    @UseGuards(SupabaseAuthGuard)
     @ApiOperation({ summary: "Get current user's posts" })
     async getMyPosts(@CurrentUser() user: User) {
         return this.postsService.getMyPosts(user.id);
@@ -57,25 +59,27 @@ export class PostsController {
 
     @Get('user/:userId')
     @ApiOperation({ summary: 'Get posts by userId' })
-    async getUserPosts(@Param('userId') userId: string, @CurrentUser() user: User) {
-        return this.postsService.getUserPosts(userId, user.id);
+    async getUserPosts(@Param('userId') userId: string, @CurrentUser() user?: User) {
+        return this.postsService.getUserPosts(userId, user?.id);
     }
 
     @Get(':id')
     @ApiOperation({ summary: 'Get a single post by ID' })
-    async getPostById(@Param('id') postId: string, @CurrentUser() user: User) {
-        return this.postsService.getPostById(postId, user.id);
+    async getPostById(@Param('id') postId: string, @CurrentUser() user?: User) {
+        return this.postsService.getPostById(postId, user?.id);
     }
 
     // ── Likes ──────────────────────────────────────────────────────────────
 
     @Post(':id/like')
+    @UseGuards(SupabaseAuthGuard)
     @ApiOperation({ summary: 'Like a post (idempotent)' })
     async likePost(@Param('id') postId: string, @CurrentUser() user: User) {
         return this.postsService.likePost(postId, user.id);
     }
 
     @Delete(':id/like')
+    @UseGuards(SupabaseAuthGuard)
     @ApiOperation({ summary: 'Unlike a post' })
     async unlikePost(@Param('id') postId: string, @CurrentUser() user: User) {
         return this.postsService.unlikePost(postId, user.id);
@@ -84,6 +88,7 @@ export class PostsController {
     // ── Clickthrough ────────────────────────────────────────────────────────
 
     @Post(':id/website-click')
+    @UseGuards(SupabaseAuthGuard)
     @ApiOperation({ summary: 'Record a unique website click — counted only once per user' })
     async recordWebsiteClick(@Param('id') postId: string, @CurrentUser() user: User) {
         return this.postsService.recordWebsiteClick(postId, user.id);
@@ -96,6 +101,7 @@ export class PostsController {
     }
 
     @Post(':id/share')
+    @UseGuards(SupabaseAuthGuard)
     @ApiOperation({ summary: 'Record a post share with basic duplicate-abuse protection' })
     async sharePost(
         @Param('id') postId: string,
@@ -108,6 +114,7 @@ export class PostsController {
     // ── Comments ────────────────────────────────────────────────────────────
 
     @Post(':id/comments')
+    @UseGuards(SupabaseAuthGuard)
     @ApiOperation({ summary: 'Add a comment to a post' })
     async addComment(
         @Param('id') postId: string,
@@ -132,12 +139,14 @@ export class PostsController {
     // ── Saves ───────────────────────────────────────────────────────────────
 
     @Post(':id/save')
+    @UseGuards(SupabaseAuthGuard)
     @ApiOperation({ summary: 'Save a post (idempotent)' })
     async savePost(@Param('id') postId: string, @CurrentUser() user: User) {
         return this.postsService.savePost(postId, user.id);
     }
 
     @Delete(':id/save')
+    @UseGuards(SupabaseAuthGuard)
     @ApiOperation({ summary: 'Unsave a post' })
     async unsavePost(@Param('id') postId: string, @CurrentUser() user: User) {
         return this.postsService.unsavePost(postId, user.id);

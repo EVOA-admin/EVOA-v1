@@ -213,7 +213,7 @@ export class PostsService {
             .map((s, index) => ({ ...s, rank: index + 1 }));
     }
 
-    async getAllPosts(requestingUserId: string, limit = 50, offset = 0) {
+    async getAllPosts(requestingUserId?: string, limit = 50, offset = 0) {
         const posts = await this.postRepo.find({
             where: { deletedAt: IsNull() },
             relations: ['user'],
@@ -335,7 +335,7 @@ export class PostsService {
         });
     }
 
-    async getPostById(postId: string, requestingUserId: string) {
+    async getPostById(postId: string, requestingUserId?: string) {
         const post = await this.postRepo.findOne({
             where: { id: postId, deletedAt: IsNull() },
             relations: ['user'],
