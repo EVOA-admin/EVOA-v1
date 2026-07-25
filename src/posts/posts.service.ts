@@ -227,9 +227,9 @@ export class PostsService {
         const postIds = posts.map(p => p.id);
 
         // 1. Batch-fetch which posts this user has liked
-        const likes = await this.postLikeRepo.find({
+        const likes = requestingUserId ? await this.postLikeRepo.find({
             where: postIds.map(id => ({ postId: id, userId: requestingUserId })),
-        });
+        }) : [];
         const likedSet = new Set(likes.map(l => l.postId));
 
         // 2. Identify startup posts — either via direct startupId or user.role === 'startup'
