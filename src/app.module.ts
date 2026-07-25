@@ -24,6 +24,7 @@ import { AmbassadorModule } from './ambassador/ambassador.module';
 import { PricingModule } from './pricing/pricing.module';
 import { BattlegroundModule } from './battleground/battleground.module';
 import { AdminModule } from './admin/admin.module';
+import { EventsModule } from './events/events.module';
 
 @Module({
     imports: [
@@ -61,6 +62,7 @@ import { AdminModule } from './admin/admin.module';
         PricingModule,
         BattlegroundModule,
         AdminModule,
+        EventsModule,
     ],
     providers: [
         {
