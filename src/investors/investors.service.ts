@@ -45,10 +45,15 @@ export class InvestorsService {
         const userUpdate: Partial<User> = {};
         if (dto.name) userUpdate.fullName = dto.name;
         if (dto.logoUrl) userUpdate.avatarUrl = dto.logoUrl;
+
+        // TEMPORARY: Subscription step is paused for Investors.
+        // Set investor account to active and fully registered upon profile creation.
         userUpdate.planType = UserPlanType.INVESTOR_PREMIUM;
-        userUpdate.subscriptionStatus = SubscriptionStatus.PENDING;
-        userUpdate.isPremium = false;
-        userUpdate.isPaymentPending = true;
+        userUpdate.subscriptionStatus = SubscriptionStatus.ACTIVE;
+        userUpdate.isPremium = true;
+        userUpdate.isPaymentPending = false;
+        userUpdate.registrationCompleted = true;
+        userUpdate.roleSelected = true;
         userUpdate.isLegacyUser = false;
         if (Object.keys(userUpdate).length > 0) {
             await this.userRepository.update({ id: userId }, userUpdate);
