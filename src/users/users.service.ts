@@ -241,11 +241,13 @@ export class UsersService {
 
         if (!user) {
             // Brand new user — create with defaults
+            const fullName = user_metadata?.full_name || user_metadata?.name || user_metadata?.fullName || email?.split('@')[0] || 'User';
+            const avatarUrl = user_metadata?.avatar_url || user_metadata?.picture || '';
             user = this.userRepository.create({
                 email,
                 supabaseUserId: id,
-                fullName: user_metadata?.full_name || user_metadata?.name || email?.split('@')[0] || '',
-                avatarUrl: user_metadata?.avatar_url || '',
+                fullName,
+                avatarUrl,
                 role: shouldForceAdmin ? UserRole.ADMIN : UserRole.VIEWER,
                 roleSelected: shouldForceAdmin,
                 registrationCompleted: shouldForceAdmin,
@@ -253,15 +255,24 @@ export class UsersService {
             });
             await this.userRepository.save(user);
         } else {
-            // Existing user: if they have a role but the flags were never explicitly set
-            // (i.e. they predated the two-flag system), backfill the flags in the DB now
-            // so the frontend always gets authoritative boolean values, never null.
+            // Existing user: if fullName is missing or generic "User", auto-heal from user_metadata / email
             let needsSave = false;
-            if (user.role && user.roleSelected === null || user.roleSelected === undefined) {
+            const healedName = user_metadata?.full_name || user_metadata?.name || user_metadata?.fullName || email?.split('@')[0];
+            if ((!user.fullName || user.fullName === 'User') && healedName) {
+                user.fullName = healedName;
+                needsSave = true;
+            }
+            const healedAvatar = user_metadata?.avatar_url || user_metadata?.picture;
+            if (!user.avatarUrl && healedAvatar) {
+                user.avatarUrl = healedAvatar;
+                needsSave = true;
+            }
+
+            if (user.role && (user.roleSelected === null || user.roleSelected === undefined)) {
                 (user as any).roleSelected = true;
                 needsSave = true;
             }
-            if (user.role && user.registrationCompleted === null || user.registrationCompleted === undefined) {
+            if (user.role && (user.registrationCompleted === null || user.registrationCompleted === undefined)) {
                 (user as any).registrationCompleted = true;
                 needsSave = true;
             }
