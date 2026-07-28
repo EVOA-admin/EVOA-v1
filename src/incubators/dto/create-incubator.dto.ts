@@ -71,6 +71,14 @@ export class CreateIncubatorDto {
 
     @IsOptional()
     @IsString()
+    verificationDocumentType?: string;
+
+    @IsOptional()
+    @IsString()
+    verificationDocumentUrl?: string;
+
+    @IsOptional()
+    @IsString()
     equityPolicy?: string;
 
     @IsOptional()

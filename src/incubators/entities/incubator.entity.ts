@@ -77,6 +77,12 @@ export class Incubator {
     @Column({ name: 'affiliation_type', nullable: true })
     affiliationType: string;
 
+    @Column({ name: 'verification_document_type', nullable: true })
+    verificationDocumentType: string;
+
+    @Column({ name: 'verification_document_url', nullable: true })
+    verificationDocumentUrl: string;
+
     @Column({ name: 'equity_policy', nullable: true })
     equityPolicy: string;
 
