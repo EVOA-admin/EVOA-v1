@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { createHmac, randomBytes } from 'crypto';
 import { PricingOrder } from './entities/pricing-order.entity';
 import { User, UserPlanType, UserRole, SubscriptionStatus } from '../users/entities/user.entity';
+import { Event, EventType } from '../events/entities/event.entity';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { VerifyPaymentDto } from './dto/verify-payment.dto';
 import { hasActivePremiumAccess } from '../users/user-access.util';
@@ -69,6 +70,8 @@ export class PricingService {
         private readonly pricingOrderRepository: Repository<PricingOrder>,
         @InjectRepository(User)
         private readonly userRepository: Repository<User>,
+        @InjectRepository(Event)
+        private readonly eventRepo: Repository<Event>,
     ) { }
 
     private readonly plans: Record<CreateOrderDto['planType'], PlanConfig> = {
@@ -380,6 +383,8 @@ export class PricingService {
             throw new BadRequestException('Payment signature verification failed.');
         }
 
+        const isEventOnly = order?.eventType === EventType.EVENT || order?.eventType === 'event_only' || order?.eventType === 'event';
+
         const subscriptionStartDate = new Date();
         const subscriptionEndDate = new Date(subscriptionStartDate.getTime() + 30 * 24 * 60 * 60 * 1000);
 
@@ -393,76 +398,55 @@ export class PricingService {
             },
         );
 
-        const userUpdate: Partial<User> = {
-            isPremium: true,
-            isPaymentPending: false,
-            planType: plan.planType,
-            subscriptionStatus: SubscriptionStatus.ACTIVE,
-            subscriptionStartDate,
-            subscriptionEndDate,
-        };
+        if (!isEventOnly) {
+            // Event Type: Event + Evoa Subscription -> Grant 1-Month Evoa Subscription
+            const userUpdate: Partial<User> = {
+                isPremium: true,
+                isPaymentPending: false,
+                planType: plan.planType,
+                subscriptionStatus: SubscriptionStatus.ACTIVE,
+                subscriptionStartDate,
+                subscriptionEndDate,
+            };
 
-        if (freshUser.role === UserRole.INVESTOR && plan.planType === UserPlanType.INVESTOR_PREMIUM) {
-            userUpdate.registrationCompleted = true;
+            if (freshUser.role === UserRole.INVESTOR && plan.planType === UserPlanType.INVESTOR_PREMIUM) {
+                userUpdate.registrationCompleted = true;
+            }
+
+            await this.userRepository.update({ id: freshUser.id }, userUpdate);
         }
-
-        await this.userRepository.update({ id: freshUser.id }, userUpdate);
 
         return {
             success: true,
-            message: 'Payment verified successfully.',
+            message: isEventOnly
+                ? 'Event ticket purchased successfully.'
+                : 'Payment verified successfully. Subscription activated.',
             planType: dto.planType,
             subscriptionStatus: SubscriptionStatus.ACTIVE,
-            subscriptionStartDate,
-            subscriptionEndDate,
+            subscriptionStartDate: isEventOnly ? undefined : subscriptionStartDate,
+            subscriptionEndDate: isEventOnly ? undefined : subscriptionEndDate,
         };
     }
+
     /**
-     * Create a Razorpay order specifically for the EVOA × PitchIn 180 Seconds event bundle.
-     * Price: ₹999 (99900 paise). Activates 1-month startup_pro premium on payment success.
-     * Reuses the startup_pro plan type to avoid any database enum migration.
-     * Unlike createOrder(), this does NOT block users who already have an active subscription
-     * because they may legitimately want the event ticket independently.
+     * Create a Razorpay order for an EVOA event pass.
+     * Supports both "Event" (event_only) and "Event + Evoa Subscription" (event_with_subscription).
      */
-    async createEventOrder(user: User) {
+    async createEventOrder(user: User, eventId?: string, amount?: number, eventTypeOverride?: string) {
         const freshUser = await this.getFreshUser(user.id);
 
-        if (freshUser.role !== UserRole.STARTUP) {
-            throw new ForbiddenException('Only Startup accounts can purchase the event bundle.');
+        let event: Event | null = null;
+        if (eventId) {
+            event = await this.eventRepo.findOne({ where: { id: eventId } });
         }
 
-        const plan: PlanConfig = {
-            amountPaise: 99900, // ₹999
-            role: UserRole.STARTUP,
-            planType: UserPlanType.STARTUP_PRO,
-            name: 'EVOA × PitchIn 180 Seconds Bundle',
-        };
-
-        // Check for an existing pending event order to avoid duplicate charges
-        const existingPending = await this.pricingOrderRepository.findOne({
-            where: {
-                userId: freshUser.id,
-                planType: plan.planType,
-                subscriptionStatus: SubscriptionStatus.PENDING,
-            },
-            order: { createdAt: 'DESC' },
-        });
-
-        if (existingPending?.razorpayOrderId) {
-            return {
-                orderId: existingPending.razorpayOrderId,
-                amount: existingPending.amountPaise,
-                currency: existingPending.currency,
-                planType: 'startup_pro',
-                planName: plan.name,
-                razorpayKey: this.razorpayKeyId,
-                subscriptionStatus: SubscriptionStatus.PENDING,
-            };
-        }
+        const resolvedEventType = eventTypeOverride || event?.eventType || EventType.EVENT_WITH_SUBSCRIPTION;
+        const amountPaise = amount ? Math.round(amount * 100) : 99900;
+        const planName = event?.title ? `${event.title} Pass` : 'EVOA Event Pass';
 
         const receipt = this.generateReceipt('startup_pro', freshUser.id);
         const razorpayOrder = await this.createRazorpayOrder(
-            plan.amountPaise,
+            amountPaise,
             receipt,
             freshUser.id,
             'startup_pro',
@@ -470,10 +454,12 @@ export class PricingService {
 
         const order = this.pricingOrderRepository.create({
             userId: freshUser.id,
-            planType: plan.planType,
+            planType: UserPlanType.STARTUP_PRO,
             razorpayOrderId: razorpayOrder.id,
+            eventId: eventId || null,
+            eventType: resolvedEventType,
             paymentId: null,
-            amountPaise: plan.amountPaise,
+            amountPaise,
             currency: 'INR',
             subscriptionStatus: SubscriptionStatus.PENDING,
             providerSignature: null,
@@ -482,26 +468,15 @@ export class PricingService {
 
         await this.pricingOrderRepository.save(order);
 
-        await this.userRepository.update(
-            { id: freshUser.id },
-            {
-                isPremium: false,
-                planType: plan.planType,
-                subscriptionStatus: SubscriptionStatus.PENDING,
-                subscriptionStartDate: null,
-                subscriptionEndDate: null,
-                isPaymentPending: false,
-            },
-        );
-
         return {
             orderId: razorpayOrder.id,
             planType: 'startup_pro',
-            amount: plan.amountPaise,
+            amount: amountPaise,
             currency: 'INR',
             subscriptionStatus: SubscriptionStatus.PENDING,
             razorpayKey: this.razorpayKeyId,
-            planName: plan.name,
+            planName,
+            eventType: resolvedEventType,
         };
     }
 }

@@ -37,8 +37,11 @@ export class PricingController {
     @Post('create-event-order')
     @UseGuards(SupabaseAuthGuard)
     @ApiBearerAuth()
-    @ApiOperation({ summary: 'Create a ₹999 Razorpay order for the EVOA × PitchIn 180 Seconds event bundle' })
-    createEventOrder(@CurrentUser() user: User) {
-        return this.pricingService.createEventOrder(user);
+    @ApiOperation({ summary: 'Create a Razorpay order for an EVOA event pass' })
+    createEventOrder(
+        @CurrentUser() user: User,
+        @Body() dto?: { eventId?: string; amount?: number; eventType?: string },
+    ) {
+        return this.pricingService.createEventOrder(user, dto?.eventId, dto?.amount, dto?.eventType);
     }
 }

@@ -2,9 +2,13 @@ import {
     IsString, IsOptional, IsEnum, IsBoolean, IsArray, IsInt, Min,
 } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
-import { EventStatus, VenueType } from '../entities/event.entity';
+import { EventStatus, VenueType, EventType } from '../entities/event.entity';
 
 export class CreateEventDto {
+    @ApiProperty({ enum: EventType, required: false })
+    @IsOptional()
+    @IsEnum(EventType)
+    eventType?: EventType;
     @ApiProperty()
     @IsString()
     title: string;

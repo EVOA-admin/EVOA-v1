@@ -25,6 +25,12 @@ export class PricingOrder {
     @Index()
     razorpayOrderId: string;
 
+    @Column({ name: 'event_id', type: 'varchar', nullable: true })
+    eventId: string | null;
+
+    @Column({ name: 'event_type', type: 'varchar', nullable: true })
+    eventType: string | null;
+
     @Column({ name: 'payment_id', type: 'varchar', length: 255, unique: true, nullable: true })
     @Index()
     paymentId: string | null;

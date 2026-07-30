@@ -17,10 +17,18 @@ export enum VenueType {
     HYBRID = 'hybrid',
 }
 
+export enum EventType {
+    EVENT = 'event_only',
+    EVENT_WITH_SUBSCRIPTION = 'event_with_subscription',
+}
+
 @Entity('events')
 export class Event {
     @PrimaryGeneratedColumn('uuid')
     id: string;
+
+    @Column({ name: 'event_type', type: 'varchar', default: EventType.EVENT_WITH_SUBSCRIPTION })
+    eventType: EventType;
 
     @Column({ unique: true })
     @Index()
