@@ -3,10 +3,14 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Event, EventStatus } from './entities/event.entity';
 import { EventTicket } from './entities/event-ticket.entity';
+import { UserEventTicket } from './entities/user-event-ticket.entity';
+import { User } from '../users/entities/user.entity';
 import { CreateEventDto } from './dto/create-event.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
 import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
+import { BookTicketDto } from './dto/book-ticket.dto';
+import { randomBytes } from 'crypto';
 
 @Injectable()
 export class EventsService {
@@ -15,6 +19,10 @@ export class EventsService {
         private readonly eventRepo: Repository<Event>,
         @InjectRepository(EventTicket)
         private readonly ticketRepo: Repository<EventTicket>,
+        @InjectRepository(UserEventTicket)
+        private readonly userTicketRepo: Repository<UserEventTicket>,
+        @InjectRepository(User)
+        private readonly userRepo: Repository<User>,
     ) {}
 
     // Helper: Slugify title
@@ -200,5 +208,124 @@ export class EventsService {
         }
         await this.ticketRepo.remove(ticket);
         return { message: 'Ticket deleted successfully.' };
+    }
+
+    // ── DIGITAL TICKET SYSTEM ──────────────────────────────────────────────────
+
+    async bookTicket(user: User, dto: BookTicketDto): Promise<UserEventTicket> {
+        const event = await this.getEventById(dto.eventId);
+
+        // Check if user already purchased a ticket for this event
+        const whereConditions: any[] = [
+            { userId: user.id, eventId: event.id },
+        ];
+        if (user.supabaseUserId) whereConditions.push({ userId: user.supabaseUserId, eventId: event.id });
+        if (user.email) whereConditions.push({ userEmail: user.email, eventId: event.id });
+
+        const existingTicket = await this.userTicketRepo.findOne({
+            where: whereConditions,
+            relations: ['event'],
+        });
+
+        if (existingTicket) {
+            return existingTicket;
+        }
+
+        // Generate unique ticket code: TKT-EVOA-XXXXXX
+        let ticketCode = '';
+        let exists = true;
+        while (exists) {
+            const randomCode = randomBytes(3).toString('hex').toUpperCase();
+            ticketCode = `TKT-EVOA-${randomCode}`;
+            const found = await this.userTicketRepo.findOne({ where: { ticketCode } });
+            if (!found) exists = false;
+        }
+
+        const resolvedName = (
+            (dto.userName && dto.userName.trim() && dto.userName.trim() !== 'Evoa Attendee')
+                ? dto.userName.trim()
+                : (user?.fullName && user.fullName.trim() && user.fullName.trim() !== 'Evoa Attendee')
+                    ? user.fullName.trim()
+                    : ((user as any)?.name && (user as any).name.trim())
+                        ? (user as any).name.trim()
+                        : ((user as any)?.username && (user as any).username.trim())
+                            ? (user as any).username.trim()
+                            : ((user as any)?.startupUsername && (user as any).startupUsername.trim())
+                                ? (user as any).startupUsername.trim()
+                                : (user?.email && user.email.trim())
+                                    ? user.email.trim()
+                                    : (dto.userEmail && dto.userEmail.trim())
+                                        ? dto.userEmail.trim()
+                                        : 'Evoa Attendee'
+        );
+
+        const userName = resolvedName;
+        const userEmail = dto.userEmail || user?.email || '';
+        const userRole = dto.userRole || user?.role || 'user';
+
+        // Secure QR payload encoding unique identifiers
+        const qrPayload = {
+            ticketId: ticketCode,
+            userId: user.id,
+            eventId: event.id,
+            purchaseId: dto.orderId || dto.paymentId || ticketCode,
+            timestamp: Date.now(),
+        };
+
+        const userTicket = new UserEventTicket();
+        userTicket.ticketCode = ticketCode;
+        userTicket.userId = user.id;
+        userTicket.eventId = event.id;
+        userTicket.userRole = userRole;
+        userTicket.userName = userName;
+        userTicket.userEmail = userEmail;
+        userTicket.price = dto.price ?? 0;
+        userTicket.orderId = dto.orderId || '';
+        userTicket.paymentId = dto.paymentId || '';
+        userTicket.qrCodeData = JSON.stringify(qrPayload);
+
+        const saved = await this.userTicketRepo.save(userTicket);
+        saved.event = event;
+        return saved;
+    }
+
+    async getUserTicketForEvent(user: User, eventId: string): Promise<UserEventTicket | null> {
+        const whereConditions: any[] = [
+            { userId: user.id, eventId },
+        ];
+        if (user?.supabaseUserId) whereConditions.push({ userId: user.supabaseUserId, eventId });
+        if (user?.email) whereConditions.push({ userEmail: user.email, eventId });
+
+        return this.userTicketRepo.findOne({
+            where: whereConditions,
+            relations: ['event'],
+        });
+    }
+
+    async getMyTickets(user: User): Promise<UserEventTicket[]> {
+        const whereConditions: any[] = [
+            { userId: user.id },
+        ];
+        if (user?.supabaseUserId) whereConditions.push({ userId: user.supabaseUserId });
+        if (user?.email) whereConditions.push({ userEmail: user.email });
+
+        return this.userTicketRepo.find({
+            where: whereConditions,
+            relations: ['event'],
+            order: { createdAt: 'DESC' },
+        });
+    }
+
+    async getTicketByCode(ticketCode: string): Promise<UserEventTicket> {
+        const ticket = await this.userTicketRepo.findOne({
+            where: { ticketCode },
+            relations: ['event'],
+        });
+
+        if (!ticket) {
+            throw new NotFoundException(`Ticket "${ticketCode}" not found.`);
+        }
+
+        return ticket;
     }
 }

@@ -11,12 +11,46 @@ import { EventStatus } from './entities/event.entity';
 import { SupabaseAuthGuard } from '../auth/guards/supabase-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
-import { UserRole } from '../users/entities/user.entity';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { User, UserRole } from '../users/entities/user.entity';
+import { BookTicketDto } from './dto/book-ticket.dto';
 
 @ApiTags('Events')
 @Controller('events')
 export class EventsController {
     constructor(private readonly eventsService: EventsService) {}
+
+    // ── DIGITAL TICKET ENDPOINTS ──────────────────────────────────────────────
+
+    @Post('book-ticket')
+    @UseGuards(SupabaseAuthGuard)
+    @ApiBearerAuth()
+    @ApiOperation({ summary: 'Book/Issue a digital event ticket for the current user' })
+    async bookTicket(@CurrentUser() user: User, @Body() dto: BookTicketDto) {
+        return this.eventsService.bookTicket(user, dto);
+    }
+
+    @Get('my-tickets')
+    @UseGuards(SupabaseAuthGuard)
+    @ApiBearerAuth()
+    @ApiOperation({ summary: 'Get all purchased event tickets for the current user' })
+    async getMyTickets(@CurrentUser() user: User) {
+        return this.eventsService.getMyTickets(user);
+    }
+
+    @Get('user-ticket/:eventId')
+    @UseGuards(SupabaseAuthGuard)
+    @ApiBearerAuth()
+    @ApiOperation({ summary: 'Check if current user has booked a ticket for a specific event' })
+    async getUserTicketForEvent(@CurrentUser() user: User, @Param('eventId') eventId: string) {
+        return this.eventsService.getUserTicketForEvent(user, eventId);
+    }
+
+    @Get('ticket-code/:code')
+    @ApiOperation({ summary: 'Get ticket details by ticket code' })
+    async getTicketByCode(@Param('code') code: string) {
+        return this.eventsService.getTicketByCode(code);
+    }
 
     // ── 1. STATIC PUBLIC ENDPOINTS ────────────────────────────────────────────
 
