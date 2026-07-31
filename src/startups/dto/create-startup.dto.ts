@@ -15,6 +15,10 @@ class FounderDto {
     mobile?: string;
 
     @IsString()
+    @IsOptional()
+    phone?: string;
+
+    @IsString()
     @IsNotEmpty()
     role: string;
 
@@ -160,6 +164,14 @@ export class CreateStartupDto {
     @IsString()
     @IsOptional()
     website?: string;
+
+    @IsString()
+    @IsOptional()
+    phone?: string;
+
+    @IsString()
+    @IsOptional()
+    mobile?: string;
 
     @IsEmail()
     @IsOptional()
