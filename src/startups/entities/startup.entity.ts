@@ -27,11 +27,11 @@ export class Startup {
     @Column({ type: 'text', nullable: true })
     description: string;
 
-    @Column({ length: 100, nullable: true })
+    @Column({ type: 'varchar', length: 100, nullable: true })
     @Index()
     industry: string;
 
-    @Column({ length: 50, nullable: true })
+    @Column({ type: 'varchar', length: 50, nullable: true })
     @Index()
     stage: string;
 

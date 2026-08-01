@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsUrl, IsArray, IsNumber, IsObject, IsDateString } from 'class-validator';
+import { IsString, IsOptional, IsArray, IsNumber, IsObject, IsDateString } from 'class-validator';
 
 export class CreateIncubatorDto {
     @IsString()
@@ -22,7 +22,7 @@ export class CreateIncubatorDto {
     description?: string;
 
     @IsOptional()
-    @IsUrl()
+    @IsString()
     website?: string;
 
     @IsOptional()

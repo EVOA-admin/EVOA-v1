@@ -410,8 +410,66 @@ export class StartupsService {
             if (existing) throw new ConflictException('Username already taken');
         }
 
-        Object.assign(startup, dto);
-        return this.startupRepository.save(startup);
+        // Explicitly map allowed Startup entity properties, ignoring unmapped payload fields
+        if (dto.name !== undefined) startup.name = dto.name;
+        if (dto.username !== undefined) startup.username = dto.username;
+        if (dto.tagline !== undefined) startup.tagline = (dto.tagline || null) as any;
+        if (dto.description !== undefined || dto.shortDescription !== undefined) {
+            startup.description = (dto.description || dto.shortDescription || null) as any;
+        }
+        if (dto.industries !== undefined) {
+            startup.industries = Array.isArray(dto.industries) ? dto.industries : [];
+            startup.industry = (startup.industries[0] || null) as any;
+        } else if (dto.industry !== undefined) {
+            startup.industry = (dto.industry || null) as any;
+        }
+        if (dto.stage !== undefined) startup.stage = (dto.stage || null) as any;
+        if (dto.raisingAmount !== undefined) startup.raisingAmount = (Number(dto.raisingAmount) || null) as any;
+        if (dto.equityPercentage !== undefined) startup.equityPercentage = (Number(dto.equityPercentage) || null) as any;
+        if (dto.revenue !== undefined) startup.revenue = (Number(dto.revenue) || null) as any;
+        if (dto.website !== undefined) startup.website = (dto.website || null) as any;
+        if (dto.logoUrl !== undefined) startup.logoUrl = (dto.logoUrl || null) as any;
+        if (dto.location !== undefined) startup.location = (dto.location || null) as any;
+        if (dto.founders !== undefined) startup.founders = Array.isArray(dto.founders) ? dto.founders : [];
+        if (dto.verification !== undefined) startup.verification = (dto.verification || null) as any;
+        if (dto.pitchVideoUrl !== undefined) startup.pitchVideoUrl = (dto.pitchVideoUrl || null) as any;
+        if (dto.pitchDeckUrl !== undefined) startup.pitchDeckUrl = (dto.pitchDeckUrl || null) as any;
+        if (dto.socialLinks !== undefined) startup.socialLinks = (dto.socialLinks || null) as any;
+        if (dto.teamMembers !== undefined) startup.teamMembers = Array.isArray(dto.teamMembers) ? dto.teamMembers : [];
+        if (dto.categoryTags !== undefined) startup.categoryTags = Array.isArray(dto.categoryTags) ? dto.categoryTags : [];
+
+        if (dto.hashtags !== undefined) {
+            startup.hashtags = Array.isArray(dto.hashtags)
+                ? dto.hashtags.map((t: string) => t.replace(/^#/, '').toLowerCase())
+                : typeof dto.hashtags === 'string' && dto.hashtags.trim()
+                    ? dto.hashtags.replace(/#/g, '').split(/[\s,]+/).filter(Boolean).map((t: string) => t.toLowerCase())
+                    : [];
+        }
+
+        const saved = (await this.startupRepository.save(startup)) as unknown as Startup;
+
+        // Sync registration name & logo back to the users table
+        try {
+            const userUpdate: Partial<User> = {};
+            if (dto.name) userUpdate.fullName = dto.name;
+            if (dto.logoUrl) userUpdate.avatarUrl = dto.logoUrl;
+            if (Object.keys(userUpdate).length > 0) {
+                await this.userRepository.update({ id: userId }, userUpdate);
+            }
+        } catch (err) {
+            console.warn('[StartupsService] Failed to sync user profile fields in updateStartup:', err?.message);
+        }
+
+        // Auto-create or update pitch Reel if video is provided
+        if (dto.pitchVideoUrl) {
+            try {
+                await this.publishPitchReel(userId);
+            } catch (reelErr) {
+                console.warn('[StartupsService] Could not publish pitch reel on update:', reelErr?.message);
+            }
+        }
+
+        return saved;
     }
 
     async getUserFollowedStartups(userId: string) {

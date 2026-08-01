@@ -1,9 +1,20 @@
-import { IsString, IsOptional, IsUrl, IsArray, IsNumber, IsObject, IsBoolean } from 'class-validator';
-import { Type } from 'class-transformer';
+import { IsString, IsOptional, IsArray, IsNumber, IsObject } from 'class-validator';
 
 export class CreateInvestorDto {
     @IsString()
     name: string;
+
+    @IsOptional()
+    @IsString()
+    phone?: string;
+
+    @IsOptional()
+    @IsString()
+    mobile?: string;
+
+    @IsOptional()
+    @IsString()
+    panNumber?: string;
 
     @IsOptional()
     @IsString()
@@ -26,7 +37,7 @@ export class CreateInvestorDto {
     description?: string;
 
     @IsOptional()
-    @IsUrl()
+    @IsString()
     website?: string;
 
     @IsOptional()
@@ -56,7 +67,7 @@ export class CreateInvestorDto {
     location?: { city: string; state: string; country: string };
 
     @IsOptional()
-    @IsUrl()
+    @IsString()
     linkedin?: string;
 
     @IsOptional()
@@ -72,3 +83,4 @@ export class CreateInvestorDto {
     @IsString({ each: true })
     credentials?: string[];
 }
+
