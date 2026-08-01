@@ -102,6 +102,9 @@ export class StartupsService {
             equityPercentage: dto.equityPercentage || null,
             revenue: dto.revenue || null,
             website: dto.website || null,
+            companyEmail: dto.companyEmail || null,
+            phone: dto.phone || null,
+            mobile: dto.mobile || dto.phone || null,
             logoUrl: dto.logoUrl || null,
             location: dto.location || null,
             founders: dto.founders || [],
@@ -413,6 +416,9 @@ export class StartupsService {
         // Explicitly map allowed Startup entity properties, ignoring unmapped payload fields
         if (dto.name !== undefined) startup.name = dto.name;
         if (dto.username !== undefined) startup.username = dto.username;
+        if (dto.companyEmail !== undefined) startup.companyEmail = (dto.companyEmail || null) as any;
+        if (dto.phone !== undefined) startup.phone = (dto.phone || null) as any;
+        if (dto.mobile !== undefined) startup.mobile = (dto.mobile || dto.phone || null) as any;
         if (dto.tagline !== undefined) startup.tagline = (dto.tagline || null) as any;
         if (dto.description !== undefined || dto.shortDescription !== undefined) {
             startup.description = (dto.description || dto.shortDescription || null) as any;

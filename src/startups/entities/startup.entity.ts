@@ -53,6 +53,15 @@ export class Startup {
     @Column({ name: 'follower_count', default: 0 })
     followerCount: number;
 
+    @Column({ name: 'company_email', nullable: true })
+    companyEmail: string;
+
+    @Column({ nullable: true })
+    phone: string;
+
+    @Column({ nullable: true })
+    mobile: string;
+
     @Column({ unique: true, nullable: true })
     username: string;
 

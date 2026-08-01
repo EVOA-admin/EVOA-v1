@@ -211,7 +211,10 @@ export class CreateStartupDto {
     @IsOptional()
     pitchDeckUrl?: string;
 
-    // Correct field names matching the Startup entity columns
+    @IsNumber()
+    @IsOptional()
+    revenue?: number;
+
     @IsNumber()
     @IsOptional()
     raisingAmount?: number;
