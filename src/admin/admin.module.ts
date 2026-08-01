@@ -9,6 +9,10 @@ import { Startup } from '../startups/entities/startup.entity';
 import { User } from '../users/entities/user.entity';
 import { AdminController } from './admin.controller';
 import { AdminService } from './admin.service';
+import { AdminAuthController } from './admin-auth.controller';
+import { AdminManagementController } from './admin-management.controller';
+import { AdminAuthService } from './admin-auth.service';
+import { Admin } from './entities/admin.entity';
 import { BattlegroundAdminState } from './entities/battleground-admin-state.entity';
 
 @Module({
@@ -21,10 +25,12 @@ import { BattlegroundAdminState } from './entities/battleground-admin-state.enti
             BattlegroundRegistration,
             PricingOrder,
             BattlegroundAdminState,
+            Admin,
         ]),
         AuthGuardModule,
     ],
-    controllers: [AdminController],
-    providers: [AdminService],
+    controllers: [AdminController, AdminAuthController, AdminManagementController],
+    providers: [AdminService, AdminAuthService],
+    exports: [AdminAuthService],
 })
 export class AdminModule { }

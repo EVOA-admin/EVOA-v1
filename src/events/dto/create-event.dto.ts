@@ -1,12 +1,18 @@
 import {
     IsString, IsOptional, IsEnum, IsBoolean, IsArray, IsInt, Min,
 } from 'class-validator';
+import { Transform } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
 import { EventStatus, VenueType, EventType } from '../entities/event.entity';
 
 export class CreateEventDto {
     @ApiProperty({ enum: EventType, required: false })
     @IsOptional()
+    @Transform(({ value }) => {
+        if (value === 'event' || value === 'event_only') return EventType.EVENT;
+        if (value === 'event_with_subscription') return EventType.EVENT_WITH_SUBSCRIPTION;
+        return value;
+    })
     @IsEnum(EventType)
     eventType?: EventType;
     @ApiProperty()

@@ -1,9 +1,11 @@
 import { Injectable, CanActivate, ExecutionContext, UnauthorizedException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import * as jwt from 'jsonwebtoken';
 import { getSupabaseAdmin } from '../../config/supabase.config';
 import { User, UserRole } from '../../users/entities/user.entity';
 import { isAdminEmail } from '../../users/admin-identity.util';
+import { Admin } from '../../admin/entities/admin.entity';
 
 // ──────────────────────────────────────────────────────────────────────────────
 // In-memory JWT verification cache
@@ -80,6 +82,8 @@ export class SupabaseAuthGuard implements CanActivate {
     constructor(
         @InjectRepository(User)
         private readonly userRepository: Repository<User>,
+        @InjectRepository(Admin)
+        private readonly adminRepository: Repository<Admin>,
     ) { }
 
     async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -88,6 +92,35 @@ export class SupabaseAuthGuard implements CanActivate {
 
         if (!token) {
             throw new UnauthorizedException('No authentication token provided');
+        }
+
+        // ── Step 0: Check if token is a custom Admin JWT token ──
+        try {
+            const secret = process.env.JWT_SECRET || 'EVOA_SECRET_SUPER_KEY_2026';
+            const decoded = jwt.verify(token, secret) as any;
+            if (decoded && (decoded.adminId || decoded.sub)) {
+                const adminId = decoded.adminId || decoded.sub;
+                const dbAdmin = await this.adminRepository.findOne({ where: { id: adminId } });
+                if (dbAdmin) {
+                    if (!dbAdmin.isActive) {
+                        throw new UnauthorizedException('Admin account has been deactivated');
+                    }
+                    request.admin = dbAdmin;
+                    request.user = {
+                        id: dbAdmin.id,
+                        email: dbAdmin.email,
+                        fullName: dbAdmin.fullName,
+                        companyName: dbAdmin.companyName,
+                        role: UserRole.ADMIN,
+                        adminRole: dbAdmin.role,
+                        isActive: dbAdmin.isActive,
+                    };
+                    return true;
+                }
+            }
+        } catch (err) {
+            if (err instanceof UnauthorizedException) throw err;
+            // Not a custom Admin JWT token, proceed to Supabase token verification
         }
 
         try {
@@ -163,6 +196,24 @@ export class SupabaseAuthGuard implements CanActivate {
 
             if (user.isActive === false) {
                 throw new UnauthorizedException('This account has been deactivated.');
+            }
+
+            // Link Admin entity identity if available
+            if (email) {
+                const dbAdmin = await this.adminRepository.findOne({ where: { email: email.toLowerCase() } });
+                if (dbAdmin) {
+                    request.admin = dbAdmin;
+                    (user as any).adminRole = dbAdmin.role;
+                } else if (shouldForceAdmin) {
+                    request.admin = {
+                        id: user.id,
+                        email: user.email,
+                        fullName: user.fullName || 'EVOA Super Admin',
+                        role: 'SUPER_ADMIN',
+                        isActive: true,
+                    };
+                    (user as any).adminRole = 'SUPER_ADMIN';
+                }
             }
 
             // Attach user to request

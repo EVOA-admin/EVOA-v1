@@ -1,5 +1,5 @@
 import {
-    Controller, Get, Post, Put, Patch, Delete, Param, Body, UseGuards, Query,
+    Controller, Get, Post, Put, Patch, Delete, Param, Body, UseGuards, Query, Req,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { EventsService } from './events.service';
@@ -80,13 +80,15 @@ export class EventsController {
 
     // ── 2. STATIC ADMIN ENDPOINTS ─────────────────────────────────────────────
 
+    // ── 2. STATIC ADMIN ENDPOINTS ─────────────────────────────────────────────
+
     @Get('admin/all')
     @UseGuards(SupabaseAuthGuard, RolesGuard)
     @Roles(UserRole.ADMIN)
     @ApiBearerAuth()
     @ApiOperation({ summary: 'Get all events (admin only: includes drafts, archived)' })
-    async getAllEventsAdmin() {
-        return this.eventsService.getAllEventsAdmin();
+    async getAllEventsAdmin(@Req() req: any) {
+        return this.eventsService.getAllEventsAdmin(req.admin || req.user);
     }
 
     @Post('admin/create')
@@ -94,8 +96,8 @@ export class EventsController {
     @Roles(UserRole.ADMIN)
     @ApiBearerAuth()
     @ApiOperation({ summary: 'Create new event (admin only)' })
-    async createEvent(@Body() dto: CreateEventDto) {
-        return this.eventsService.createEvent(dto);
+    async createEvent(@Req() req: any, @Body() dto: CreateEventDto) {
+        return this.eventsService.createEvent(req.admin || req.user, dto);
     }
 
     @Put('admin/tickets/:ticketId')
@@ -123,8 +125,8 @@ export class EventsController {
     @Roles(UserRole.ADMIN)
     @ApiBearerAuth()
     @ApiOperation({ summary: 'Update event status (draft, published, archived, cancelled)' })
-    async setEventStatus(@Param('id') id: string, @Body('status') status: EventStatus) {
-        return this.eventsService.setEventStatus(id, status);
+    async setEventStatus(@Req() req: any, @Param('id') id: string, @Body('status') status: EventStatus) {
+        return this.eventsService.setEventStatus(req.admin || req.user, id, status);
     }
 
     @Patch('admin/:id/featured')
@@ -150,8 +152,8 @@ export class EventsController {
     @Roles(UserRole.ADMIN)
     @ApiBearerAuth()
     @ApiOperation({ summary: 'Update event details (admin only)' })
-    async updateEvent(@Param('id') id: string, @Body() dto: UpdateEventDto) {
-        return this.eventsService.updateEvent(id, dto);
+    async updateEvent(@Req() req: any, @Param('id') id: string, @Body() dto: UpdateEventDto) {
+        return this.eventsService.updateEvent(req.admin || req.user, id, dto);
     }
 
     @Delete('admin/:id')
@@ -159,8 +161,8 @@ export class EventsController {
     @Roles(UserRole.ADMIN)
     @ApiBearerAuth()
     @ApiOperation({ summary: 'Delete event (admin only)' })
-    async deleteEvent(@Param('id') id: string) {
-        return this.eventsService.deleteEvent(id);
+    async deleteEvent(@Req() req: any, @Param('id') id: string) {
+        return this.eventsService.deleteEvent(req.admin || req.user, id);
     }
 
     // ── 4. PARAMETERIZED PUBLIC ENDPOINTS ─────────────────────────────────────

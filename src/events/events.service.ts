@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Event, EventStatus } from './entities/event.entity';
@@ -11,6 +11,7 @@ import { CreateTicketDto } from './dto/create-ticket.dto';
 import { UpdateTicketDto } from './dto/update-ticket.dto';
 import { BookTicketDto } from './dto/book-ticket.dto';
 import { randomBytes } from 'crypto';
+import { AdminRole } from '../admin/entities/admin.entity';
 
 @Injectable()
 export class EventsService {
@@ -24,6 +25,17 @@ export class EventsService {
         @InjectRepository(User)
         private readonly userRepo: Repository<User>,
     ) {}
+
+    private checkEventAuthorization(admin: any, event: Event) {
+        const role = admin?.adminRole || admin?.role;
+        const adminId = admin?.id || admin?.sub;
+
+        if (role === AdminRole.EVENT_ADMIN || role === 'EVENT_ADMIN') {
+            if (event.createdByAdminId && event.createdByAdminId !== adminId) {
+                throw new ForbiddenException('Forbidden: Event Admins can only edit or delete events created by themselves.');
+            }
+        }
+    }
 
     // Helper: Slugify title
     private slugify(text: string): string {
@@ -104,14 +116,25 @@ export class EventsService {
 
     // ── ADMIN METHODS ─────────────────────────────────────────────────────────
 
-    async getAllEventsAdmin(): Promise<Event[]> {
+    async getAllEventsAdmin(admin?: any): Promise<Event[]> {
+        const role = admin?.adminRole || admin?.role;
+        const adminId = admin?.id || admin?.sub;
+
+        if (role === AdminRole.EVENT_ADMIN || role === 'EVENT_ADMIN') {
+            return this.eventRepo.find({
+                where: { createdByAdminId: adminId },
+                relations: ['tickets'],
+                order: { createdAt: 'DESC' },
+            });
+        }
+
         return this.eventRepo.find({
             relations: ['tickets'],
             order: { createdAt: 'DESC' },
         });
     }
 
-    async createEvent(dto: CreateEventDto): Promise<Event> {
+    async createEvent(admin: any, dto: CreateEventDto): Promise<Event> {
         let slug = dto.slug ? this.slugify(dto.slug) : this.slugify(dto.title);
 
         // Ensure unique slug
@@ -125,9 +148,14 @@ export class EventsService {
             await this.eventRepo.update({ isFeatured: true }, { isFeatured: false });
         }
 
+        const adminId = admin?.id || admin?.sub || null;
+        const adminName = admin?.fullName || admin?.name || 'EVOA Admin';
+
         const event = this.eventRepo.create({
             ...dto,
             slug,
+            createdByAdminId: adminId,
+            createdByAdminName: adminName,
             partnerLogos: dto.partnerLogos || [],
             galleryImages: dto.galleryImages || [],
             benefits: dto.benefits || [],
@@ -139,8 +167,9 @@ export class EventsService {
         return this.eventRepo.save(event);
     }
 
-    async updateEvent(id: string, dto: UpdateEventDto): Promise<Event> {
+    async updateEvent(admin: any, id: string, dto: UpdateEventDto): Promise<Event> {
         const event = await this.getEventById(id);
+        this.checkEventAuthorization(admin, event);
 
         if (dto.slug && dto.slug !== event.slug) {
             const newSlug = this.slugify(dto.slug);
@@ -159,14 +188,16 @@ export class EventsService {
         return this.eventRepo.save(event);
     }
 
-    async deleteEvent(id: string): Promise<{ message: string }> {
+    async deleteEvent(admin: any, id: string): Promise<{ message: string }> {
         const event = await this.getEventById(id);
+        this.checkEventAuthorization(admin, event);
         await this.eventRepo.remove(event);
         return { message: 'Event deleted successfully.' };
     }
 
-    async setEventStatus(id: string, status: EventStatus): Promise<Event> {
+    async setEventStatus(admin: any, id: string, status: EventStatus): Promise<Event> {
         const event = await this.getEventById(id);
+        this.checkEventAuthorization(admin, event);
         event.status = status;
         return this.eventRepo.save(event);
     }

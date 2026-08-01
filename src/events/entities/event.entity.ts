@@ -151,6 +151,12 @@ export class Event {
     @Column({ name: 'role_benefits', type: 'jsonb', nullable: true })
     roleBenefits: Record<string, Array<{ icon?: string; title: string; desc?: string }>>;
 
+    @Column({ name: 'created_by_admin_id', nullable: true })
+    createdByAdminId: string;
+
+    @Column({ name: 'created_by_admin_name', nullable: true })
+    createdByAdminName: string;
+
     @OneToMany(() => EventTicket, (ticket) => ticket.event, { cascade: true })
     tickets: EventTicket[];
 
