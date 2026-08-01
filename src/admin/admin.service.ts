@@ -1,6 +1,6 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { ILike, Repository } from 'typeorm';
+import { DataSource, ILike, Repository } from 'typeorm';
 import { BattlegroundRegistration, BattlegroundPaymentStatus } from '../battleground/entities/battleground-registration.entity';
 import { PricingOrder } from '../pricing/entities/pricing-order.entity';
 import { Reel } from '../reels/entities/reel.entity';
@@ -21,8 +21,9 @@ import {
 import { BattlegroundAdminState } from './entities/battleground-admin-state.entity';
 
 @Injectable()
-export class AdminService {
+export class AdminService implements OnModuleInit {
     constructor(
+        private readonly dataSource: DataSource,
         @InjectRepository(User)
         private readonly userRepository: Repository<User>,
         @InjectRepository(Startup)
@@ -38,6 +39,22 @@ export class AdminService {
         @InjectRepository(BattlegroundAdminState)
         private readonly battlegroundAdminStateRepository: Repository<BattlegroundAdminState>,
     ) { }
+
+    async onModuleInit() {
+        try {
+            await this.dataSource.query(`
+                ALTER TABLE pricing_orders ADD COLUMN IF NOT EXISTS event_id varchar NULL;
+                ALTER TABLE pricing_orders ADD COLUMN IF NOT EXISTS event_type varchar NULL;
+                ALTER TABLE startups ADD COLUMN IF NOT EXISTS company_email varchar NULL;
+                ALTER TABLE startups ADD COLUMN IF NOT EXISTS phone varchar NULL;
+                ALTER TABLE startups ADD COLUMN IF NOT EXISTS mobile varchar NULL;
+                ALTER TABLE investors ADD COLUMN IF NOT EXISTS phone varchar NULL;
+                ALTER TABLE investors ADD COLUMN IF NOT EXISTS mobile varchar NULL;
+            `);
+        } catch (err) {
+            console.warn('[AdminService] Schema auto-patch notice:', err?.message);
+        }
+    }
 
     private computeUserStatus(user: User) {
         if (user.isActive === false) return 'inactive';
@@ -137,33 +154,66 @@ export class AdminService {
             id: user.id,
             email: user.email,
             fullName: user.fullName,
+            companyName: user.company || null,
             role: user.role,
         };
     }
 
     async getOverview() {
-        const [totalUsers, totalStartups, totalInvestors, activeSubscriptions, totalBattlegroundParticipants, pricingOrders, battlegroundRevenue] = await Promise.all([
-            this.userRepository.count(),
-            this.startupRepository.count(),
-            this.userRepository.count({ where: { role: UserRole.INVESTOR } }),
-            this.userRepository.count({ where: { isPremium: true, subscriptionStatus: SubscriptionStatus.ACTIVE } }),
-            this.battlegroundRegistrationRepository.count({ where: { paymentStatus: BattlegroundPaymentStatus.SUCCESS } }),
-            this.pricingOrderRepository.find(),
-            this.battlegroundRegistrationRepository.find({ where: { paymentStatus: BattlegroundPaymentStatus.SUCCESS } }),
-        ]);
+        try {
+            const [totalUsers, totalStartups, totalInvestors, activeSubscriptions, totalBattlegroundParticipants] = await Promise.all([
+                this.userRepository.count().catch(() => 0),
+                this.startupRepository.count().catch(() => 0),
+                this.userRepository.count({ where: { role: UserRole.INVESTOR } }).catch(() => 0),
+                this.userRepository.count({ where: { isPremium: true, subscriptionStatus: SubscriptionStatus.ACTIVE } }).catch(() => 0),
+                this.battlegroundRegistrationRepository.count({ where: { paymentStatus: BattlegroundPaymentStatus.SUCCESS } }).catch(() => 0),
+            ]);
 
-        const pricingRevenue = pricingOrders.reduce((sum, order) => sum + (order.paymentId ? order.amountPaise : 0), 0);
-        const battlegroundTotal = battlegroundRevenue.reduce((sum, order) => sum + order.amountPaise, 0);
+            let pricingRevenue = 0;
+            try {
+                const rawPricing = await this.pricingOrderRepository
+                    .createQueryBuilder('po')
+                    .select('SUM(po.amount_paise)', 'sum')
+                    .where('po.payment_id IS NOT NULL')
+                    .getRawOne();
+                pricingRevenue = Number(rawPricing?.sum || 0);
+            } catch (err) {
+                console.warn('Failed to fetch pricing revenue:', err?.message);
+            }
 
-        return {
-            totalUsers,
-            totalStartups,
-            totalInvestors,
-            activeSubscriptions,
-            totalRevenue: (pricingRevenue + battlegroundTotal) / 100,
-            totalRevenuePaise: pricingRevenue + battlegroundTotal,
-            totalBattlegroundParticipants,
-        };
+            let battlegroundTotal = 0;
+            try {
+                const rawBg = await this.battlegroundRegistrationRepository
+                    .createQueryBuilder('bg')
+                    .select('SUM(bg.amount_paise)', 'sum')
+                    .where('bg.payment_status = :status', { status: BattlegroundPaymentStatus.SUCCESS })
+                    .getRawOne();
+                battlegroundTotal = Number(rawBg?.sum || 0);
+            } catch (err) {
+                console.warn('Failed to fetch battleground revenue:', err?.message);
+            }
+
+            return {
+                totalUsers,
+                totalStartups,
+                totalInvestors,
+                activeSubscriptions,
+                totalRevenue: (pricingRevenue + battlegroundTotal) / 100,
+                totalRevenuePaise: pricingRevenue + battlegroundTotal,
+                totalBattlegroundParticipants,
+            };
+        } catch (err) {
+            console.error('Error in getOverview:', err);
+            return {
+                totalUsers: 0,
+                totalStartups: 0,
+                totalInvestors: 0,
+                activeSubscriptions: 0,
+                totalRevenue: 0,
+                totalRevenuePaise: 0,
+                totalBattlegroundParticipants: 0,
+            };
+        }
     }
 
     async getUsers(query: AdminUsersQueryDto) {
