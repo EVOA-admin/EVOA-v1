@@ -35,6 +35,8 @@ export class InvestorsService {
         const investor = this.investorRepository.create({
             userId,
             name: dto.name,
+            phone: (dto.phone || null) as any,
+            mobile: (dto.mobile || dto.phone || null) as any,
             type: dto.type,
             designation: dto.designation,
             companyName: dto.companyName,
@@ -51,7 +53,7 @@ export class InvestorsService {
             stats: dto.stats,
             socialProof: dto.socialProof,
             credentials: dto.credentials || [],
-        });
+        } as any);
 
         const saved = await this.investorRepository.save(investor);
 
@@ -99,6 +101,8 @@ export class InvestorsService {
         }
 
         if (dto.name !== undefined) investor.name = dto.name;
+        if (dto.phone !== undefined) investor.phone = (dto.phone || null) as any;
+        if (dto.mobile !== undefined) investor.mobile = (dto.mobile || dto.phone || null) as any;
         if (dto.type !== undefined) investor.type = dto.type;
         if (dto.designation !== undefined) investor.designation = dto.designation;
         if (dto.companyName !== undefined) investor.companyName = dto.companyName;

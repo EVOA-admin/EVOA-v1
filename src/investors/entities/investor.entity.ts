@@ -18,6 +18,12 @@ export class Investor {
     name: string;
 
     @Column({ nullable: true })
+    phone: string;
+
+    @Column({ nullable: true })
+    mobile: string;
+
+    @Column({ nullable: true })
     type: string; // Angel, VC, PE, etc.
 
     @Column({ nullable: true })
