@@ -181,16 +181,18 @@ export class ChatService {
         // Attach last message and unread count to each
         const enriched = await Promise.all(
             convs.map(async (c) => {
+                const other = c.user1Id === userId ? c.user2 : c.user1;
                 const [lastMsg, unread] = await Promise.all([
                     this.messageRepo.findOne({
                         where: { conversationId: c.id },
                         order: { createdAt: 'DESC' },
                     }),
-                    this.messageRepo.count({
-                        where: { conversationId: c.id, isRead: false },
-                    }),
+                    other?.id
+                        ? this.messageRepo.count({
+                              where: { conversationId: c.id, senderId: other.id, isRead: false },
+                          })
+                        : 0,
                 ]);
-                const other = c.user1Id === userId ? c.user2 : c.user1;
                 return { ...c, lastMessage: lastMsg, unreadCount: unread, otherUser: other };
             }),
         );
