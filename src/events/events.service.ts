@@ -367,13 +367,57 @@ export class EventsService {
     async getTicketByCode(ticketCode: string): Promise<UserEventTicket> {
         const ticket = await this.userTicketRepo.findOne({
             where: { ticketCode },
-            relations: ['event'],
+            relations: ['event', 'user'],
+        });
+        if (!ticket) {
+            throw new NotFoundException(`Ticket code "${ticketCode}" not found.`);
+        }
+        return ticket;
+    }
+
+    async getAllEventCustomers(): Promise<any[]> {
+        const userTickets = await this.userTicketRepo.find({
+            relations: ['event', 'user'],
+            order: { createdAt: 'DESC' },
         });
 
-        if (!ticket) {
-            throw new NotFoundException(`Ticket "${ticketCode}" not found.`);
-        }
+        return userTickets.map((ut) => {
+            const u = (ut.user as any) || {};
+            const rawName = ut.userName || u.fullName || u.name || u.companyName || u.founderName;
+            const isEmail = (str: string) => typeof str === 'string' && str.includes('@');
+            let fullName = rawName && !isEmail(rawName) ? rawName.trim() : '';
 
-        return ticket;
+            const email = ut.userEmail || ut.user?.email || '';
+
+            if (!fullName && email && isEmail(email)) {
+                const handle = email.split('@')[0].replace(/[._-]/g, ' ');
+                fullName = handle.replace(/\b\w/g, (c) => c.toUpperCase());
+            }
+
+            if (!fullName) {
+                fullName = 'Attendee';
+            }
+
+            const eventName = ut.event?.title || 'Unknown Event';
+            const userRole = (ut.userRole || ut.user?.role || 'ATTENDEE').toUpperCase();
+            const purchaseDate = ut.createdAt;
+            const price = Number(ut.price || 0);
+            const paymentStatus = price > 0 ? 'COMPLETED (PAID)' : 'COMPLETED (FREE PASS)';
+
+            return {
+                id: ut.id,
+                ticketCode: ut.ticketCode,
+                fullName,
+                email: email || 'N/A',
+                eventName,
+                eventId: ut.eventId,
+                userRole,
+                purchaseDate,
+                price,
+                paymentStatus,
+                orderId: ut.orderId || null,
+                paymentId: ut.paymentId || null,
+            };
+        });
     }
 }

@@ -80,7 +80,14 @@ export class EventsController {
 
     // ── 2. STATIC ADMIN ENDPOINTS ─────────────────────────────────────────────
 
-    // ── 2. STATIC ADMIN ENDPOINTS ─────────────────────────────────────────────
+    @Get('admin/customers')
+    @UseGuards(SupabaseAuthGuard, RolesGuard)
+    @Roles(UserRole.ADMIN)
+    @ApiBearerAuth()
+    @ApiOperation({ summary: 'Get all event customer ticket purchases (Super Admin / Admin only)' })
+    async getAllEventCustomers() {
+        return this.eventsService.getAllEventCustomers();
+    }
 
     @Get('admin/all')
     @UseGuards(SupabaseAuthGuard, RolesGuard)
