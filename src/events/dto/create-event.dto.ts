@@ -54,6 +54,26 @@ export class CreateEventDto {
     @IsString()
     bannerUrl?: string;
 
+    @ApiProperty({ required: false })
+    @IsOptional()
+    @IsString()
+    coverImageUrl?: string;
+
+    @ApiProperty({ required: false })
+    @IsOptional()
+    @IsString()
+    cover_image_url?: string;
+
+    @ApiProperty({ required: false })
+    @IsOptional()
+    @IsString()
+    banner_url?: string;
+
+    @ApiProperty({ required: false })
+    @IsOptional()
+    @IsString()
+    poster_url?: string;
+
     @ApiProperty({ type: [String], required: false })
     @IsOptional()
     @IsArray()

@@ -13,8 +13,14 @@ import dns from 'dns';
 // Force IPv4 to prevent Supabase ENETUNREACH on Render
 dns.setDefaultResultOrder('ipv4first');
 
+import { json, urlencoded } from 'express';
+
 async function bootstrap() {
     const app = await NestFactory.create(AppModule);
+
+    // Increase body payload size limit for image uploads
+    app.use(json({ limit: '50mb' }));
+    app.use(urlencoded({ limit: '50mb', extended: true }));
 
     // Global API prefix
     app.setGlobalPrefix('api');

@@ -55,6 +55,9 @@ export class Event {
     @Column({ name: 'banner_url', type: 'text', nullable: true })
     bannerUrl: string;
 
+    @Column({ name: 'cover_image_url', type: 'text', nullable: true })
+    coverImageUrl: string;
+
     @Column({ name: 'partner_logos', type: 'jsonb', default: '[]' })
     partnerLogos: string[];
 

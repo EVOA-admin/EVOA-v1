@@ -151,8 +151,14 @@ export class EventsService {
         const adminId = admin?.id || admin?.sub || null;
         const adminName = admin?.fullName || admin?.name || 'EVOA Admin';
 
+        const coverImageUrl = dto.coverImageUrl || dto.cover_image_url || null;
+        const bannerUrl = dto.bannerUrl || dto.banner_url || dto.posterUrl || dto.poster_url || null;
+
         const event = this.eventRepo.create({
             ...dto,
+            coverImageUrl: coverImageUrl || undefined,
+            bannerUrl: bannerUrl || undefined,
+            posterUrl: bannerUrl || undefined,
             slug,
             createdByAdminId: adminId,
             createdByAdminName: adminName,
@@ -182,6 +188,17 @@ export class EventsService {
 
         if (dto.isFeatured && !event.isFeatured) {
             await this.eventRepo.update({ isFeatured: true }, { isFeatured: false });
+        }
+
+        const coverImageUrl = dto.coverImageUrl || dto.cover_image_url;
+        if (coverImageUrl !== undefined) {
+            event.coverImageUrl = coverImageUrl;
+        }
+
+        const bannerUrl = dto.bannerUrl || dto.banner_url || dto.posterUrl || dto.poster_url;
+        if (bannerUrl !== undefined) {
+            event.bannerUrl = bannerUrl;
+            event.posterUrl = bannerUrl;
         }
 
         Object.assign(event, dto);
