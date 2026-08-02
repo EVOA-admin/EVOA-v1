@@ -341,12 +341,17 @@ export class EventsService {
         const whereConditions: any[] = [
             { userId: user.id, eventId },
         ];
-        if (user?.supabaseUserId) whereConditions.push({ userId: user.supabaseUserId, eventId });
-        if (user?.email) whereConditions.push({ userEmail: user.email, eventId });
+        if (user?.supabaseUserId && user.supabaseUserId !== user.id) {
+            whereConditions.push({ userId: user.supabaseUserId, eventId });
+        }
+        if (user?.email) {
+            whereConditions.push({ userEmail: user.email, eventId });
+        }
 
         return this.userTicketRepo.findOne({
             where: whereConditions,
             relations: ['event'],
+            order: { createdAt: 'DESC' },
         });
     }
 
@@ -354,14 +359,28 @@ export class EventsService {
         const whereConditions: any[] = [
             { userId: user.id },
         ];
-        if (user?.supabaseUserId) whereConditions.push({ userId: user.supabaseUserId });
-        if (user?.email) whereConditions.push({ userEmail: user.email });
+        if (user?.supabaseUserId && user.supabaseUserId !== user.id) {
+            whereConditions.push({ userId: user.supabaseUserId });
+        }
+        if (user?.email) {
+            whereConditions.push({ userEmail: user.email });
+        }
 
-        return this.userTicketRepo.find({
+        const tickets = await this.userTicketRepo.find({
             where: whereConditions,
             relations: ['event'],
             order: { createdAt: 'DESC' },
         });
+
+        // Deduplicate tickets by ticketCode or id to ensure clean counts
+        const ticketMap = new Map<string, UserEventTicket>();
+        for (const t of tickets) {
+            const key = t.ticketCode || t.id;
+            if (key && !ticketMap.has(key)) {
+                ticketMap.set(key, t);
+            }
+        }
+        return Array.from(ticketMap.values());
     }
 
     async getTicketByCode(ticketCode: string): Promise<UserEventTicket> {
