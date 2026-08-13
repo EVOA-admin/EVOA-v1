@@ -8,7 +8,7 @@ export class MailService implements OnModuleInit {
   private readonly logger = new Logger(MailService.name);
 
   async onModuleInit() {
-    this.logger.log('MailService initialized with cloud failover support');
+    this.logger.log('MailService initialized for Zoho SMTP delivery');
   }
 
   private getSmtpPass(): string {
@@ -41,7 +41,8 @@ export class MailService implements OnModuleInit {
 
     const configs = [
       { host: primaryHost, port: primaryPort, secure: primarySecure },
-      { host: primaryHost, port: 587, secure: false },
+      { host: 'smtp.zoho.in', port: 465, secure: true },
+      { host: 'smtp.zoho.in', port: 587, secure: false },
       { host: 'smtppro.zoho.in', port: 465, secure: true },
       { host: 'smtp.zoho.com', port: 465, secure: true },
       { host: 'smtp.zoho.com', port: 587, secure: false },
@@ -60,10 +61,14 @@ export class MailService implements OnModuleInit {
         host: c.host,
         port: c.port,
         secure: c.secure,
+        requireTLS: c.port === 587,
         auth: { user, pass },
-        connectionTimeout: 6000,
-        greetingTimeout: 6000,
-        socketTimeout: 8000,
+        tls: {
+          rejectUnauthorized: false,
+        },
+        connectionTimeout: 8000,
+        greetingTimeout: 8000,
+        socketTimeout: 10000,
       })
     );
   }
@@ -86,7 +91,7 @@ export class MailService implements OnModuleInit {
         return true;
       } catch (err) {
         lastErr = err;
-        this.logger.warn(`SMTP candidate failed for ${mailOptions.to}: ${err.message}`);
+        this.logger.warn(`SMTP candidate (${(transporter.options as any).host}:${(transporter.options as any).port}) failed for ${mailOptions.to}: ${err.message}`);
       }
     }
 
