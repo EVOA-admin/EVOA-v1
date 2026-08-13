@@ -230,19 +230,41 @@ export class AuthService {
     }
 
     async forgotPassword(forgotPasswordDto: ForgotPasswordDto) {
-        const { email } = forgotPasswordDto;
+        const { email, redirectTo } = forgotPasswordDto as any;
+        const normalizedEmail = email.trim().toLowerCase();
 
-        // Use Supabase to send password reset email
-        const { error } = await supabaseClient.auth.resetPasswordForEmail(email, {
-            redirectTo: `${process.env.FRONTEND_URL}/reset-password`,
-        });
-
-        if (error) {
-            throw new BadRequestException('Failed to send password reset email');
+        const defaultFrontend = process.env.FRONTEND_URL || 'http://localhost:5173';
+        let callbackUrl = (redirectTo || defaultFrontend).trim();
+        if (!callbackUrl.includes('/create-new-password')) {
+            callbackUrl = `${callbackUrl.replace(/\/$/, '')}/create-new-password`;
         }
 
+        const { data: listData, error: listErr } = await supabaseAdmin.auth.admin.listUsers();
+        if (listErr) {
+            throw new BadRequestException(listErr.message);
+        }
+
+        const existing = ((listData?.users || []) as any[]).find((u: any) => u.email?.toLowerCase() === normalizedEmail);
+        if (!existing) {
+            throw new BadRequestException('No registered account found with this email address.');
+        }
+
+        const { data: linkData, error: linkErr } = await supabaseAdmin.auth.admin.generateLink({
+            type: 'recovery',
+            email: normalizedEmail,
+            options: { redirectTo: callbackUrl },
+        });
+
+        if (linkErr || !linkData?.properties?.action_link) {
+            throw new BadRequestException(linkErr?.message || 'Failed to generate password reset link.');
+        }
+
+        const actionLink = linkData.properties.action_link;
+        await this.mailService.sendPasswordResetEmail(normalizedEmail, actionLink);
+
         return {
-            message: 'Password reset email sent successfully',
+            success: true,
+            message: 'Password reset link sent! Check your inbox.',
         };
     }
 

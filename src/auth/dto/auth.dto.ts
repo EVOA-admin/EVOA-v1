@@ -42,6 +42,11 @@ export class ForgotPasswordDto {
     @ApiProperty({ example: 'user@example.com' })
     @IsEmail()
     email: string;
+
+    @ApiPropertyOptional()
+    @IsOptional()
+    @IsString()
+    redirectTo?: string;
 }
 
 export class RegisterDto {
