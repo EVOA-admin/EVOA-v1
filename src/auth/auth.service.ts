@@ -117,88 +117,106 @@ export class AuthService {
     }
 
     async register(registerDto: RegisterDto) {
-        const { email, password, metadata, redirectTo } = registerDto;
-        const normalizedEmail = email.trim().toLowerCase();
+        try {
+            const { email, password, metadata, redirectTo } = registerDto;
+            const normalizedEmail = email.trim().toLowerCase();
 
-        const defaultFrontend = process.env.FRONTEND_URL || 'http://localhost:5173';
-        let callbackUrl = (redirectTo || defaultFrontend).trim();
-        if (!callbackUrl.includes('/auth/callback')) {
-            callbackUrl = `${callbackUrl.replace(/\/$/, '')}/auth/callback`;
-        }
-
-        let user: any = null;
-        let isExistingUnverified = false;
-
-        // Directly attempt to create user in Supabase Auth
-        const { data: createData, error: createErr } = await supabaseAdmin.auth.admin.createUser({
-            email: normalizedEmail,
-            password,
-            user_metadata: metadata || {},
-            email_confirm: false,
-        });
-
-        if (createErr) {
-            const errMsg = createErr.message?.toLowerCase() || '';
-            if (errMsg.includes('already registered') || errMsg.includes('already exists') || errMsg.includes('email_exists')) {
-                // User account already exists in Supabase Auth — check if confirmed or unconfirmed
-                const { data: listData } = await supabaseAdmin.auth.admin.listUsers();
-                const existing = ((listData?.users || []) as any[]).find((u: any) => u.email?.toLowerCase() === normalizedEmail);
-
-                if (existing) {
-                    if (existing.email_confirmed_at) {
-                        throw new ConflictException('User is already registered and verified. Please log in.');
-                    }
-                    // Existing unverified account — update password and user metadata
-                    const { data: updated, error: updateErr } = await supabaseAdmin.auth.admin.updateUserById(
-                        existing.id,
-                        { password, user_metadata: metadata || {} }
-                    );
-                    if (updateErr) {
-                        throw new BadRequestException(updateErr.message);
-                    }
-                    user = updated.user;
-                    isExistingUnverified = true;
-                } else {
-                    throw new ConflictException('User is already registered. Please log in.');
-                }
-            } else {
-                throw new BadRequestException(createErr.message || 'Failed to create user account.');
+            const defaultFrontend = process.env.FRONTEND_URL || 'http://localhost:5173';
+            let callbackUrl = (redirectTo || defaultFrontend).trim();
+            if (!callbackUrl.includes('/auth/callback')) {
+                callbackUrl = `${callbackUrl.replace(/\/$/, '')}/auth/callback`;
             }
-        } else {
-            user = createData.user;
+
+            let user: any = null;
+
+            // Generate signup link (this atomically creates the unverified user in Supabase Auth)
+            const { data: linkData, error: linkErr } = await supabaseAdmin.auth.admin.generateLink({
+                type: 'signup',
+                email: normalizedEmail,
+                password,
+                options: {
+                    redirectTo: callbackUrl,
+                    data: metadata || {},
+                },
+            });
+
+            if (linkErr) {
+                const errMsg = linkErr.message?.toLowerCase() || '';
+                if (errMsg.includes('already registered') || errMsg.includes('already exists') || errMsg.includes('email_exists')) {
+                    // User account already exists in Supabase Auth — check if confirmed or unconfirmed
+                    const { data: listData } = await supabaseAdmin.auth.admin.listUsers({ perPage: 1000 });
+                    const usersList = listData?.users || [];
+                    const existing = usersList.find((u: any) => u.email?.trim().toLowerCase() === normalizedEmail);
+
+                    if (existing) {
+                        if (existing.email_confirmed_at) {
+                            throw new ConflictException('User is already registered and verified. Please log in.');
+                        }
+                        // Existing unverified account — update password/metadata and generate magiclink
+                        const { data: updated, error: updateErr } = await supabaseAdmin.auth.admin.updateUserById(
+                            existing.id,
+                            { password, user_metadata: metadata || {} }
+                        );
+                        if (updateErr) {
+                            throw new BadRequestException(updateErr.message);
+                        }
+                        user = updated.user;
+
+                        const { data: reLinkData, error: reLinkErr } = await supabaseAdmin.auth.admin.generateLink({
+                            type: 'magiclink',
+                            email: normalizedEmail,
+                            options: { redirectTo: callbackUrl },
+                        });
+
+                        if (reLinkErr || !reLinkData?.properties?.action_link) {
+                            throw new BadRequestException(reLinkErr?.message || 'Failed to generate verification link.');
+                        }
+
+                        const actionLink = reLinkData.properties.action_link;
+                        this.mailService.sendVerificationEmail(normalizedEmail, actionLink).catch(mErr => {
+                            this.logger.error(`Background email delivery failed for ${normalizedEmail}:`, mErr?.message || mErr);
+                        });
+
+                        return {
+                            success: true,
+                            message: 'Verification email sent. Check your inbox.',
+                            user: { id: user.id, email: user.email },
+                        };
+                    } else {
+                        throw new ConflictException('User is already registered. Please log in.');
+                    }
+                } else {
+                    throw new BadRequestException(linkErr.message || 'Failed to create user account.');
+                }
+            }
+
+            if (!linkData?.properties?.action_link) {
+                throw new BadRequestException('Failed to generate verification link.');
+            }
+
+            user = linkData.user;
+            const actionLink = linkData.properties.action_link;
+
+            // Deliver email via Zoho Mail in background — registration API responds instantly in ~150ms
+            this.mailService.sendVerificationEmail(normalizedEmail, actionLink).catch(mErr => {
+                this.logger.error(`Background email delivery failed for ${normalizedEmail}:`, mErr?.message || mErr);
+            });
+
+            return {
+                success: true,
+                message: 'Verification email sent. Check your inbox.',
+                user: {
+                    id: user?.id,
+                    email: user?.email,
+                },
+            };
+        } catch (err) {
+            this.logger.error('Registration process error:', err?.message || err);
+            if (err instanceof ConflictException || err instanceof BadRequestException) {
+                throw err;
+            }
+            throw new BadRequestException(err?.message || 'Failed to complete registration.');
         }
-
-        // Generate verification link
-        const linkType = isExistingUnverified ? 'magiclink' : 'signup';
-        const linkPayload: any = {
-            type: linkType,
-            email: normalizedEmail,
-            options: { redirectTo: callbackUrl },
-        };
-        if (!isExistingUnverified) {
-            linkPayload.password = password;
-        }
-
-        const { data: linkData, error: linkErr } = await supabaseAdmin.auth.admin.generateLink(linkPayload);
-
-        if (linkErr || !linkData?.properties?.action_link) {
-            this.logger.error('Failed to generate verification link:', linkErr);
-            throw new BadRequestException(linkErr?.message || 'Failed to generate verification link.');
-        }
-
-        const actionLink = linkData.properties.action_link;
-
-        // Deliver email via Zoho Mail
-        await this.mailService.sendVerificationEmail(normalizedEmail, actionLink);
-
-        return {
-            success: true,
-            message: 'Verification email sent. Check your inbox.',
-            user: {
-                id: user.id,
-                email: user.email,
-            },
-        };
     }
 
     async resendVerification(resendDto: ResendVerificationDto) {
@@ -211,7 +229,7 @@ export class AuthService {
             callbackUrl = `${callbackUrl.replace(/\/$/, '')}/auth/callback`;
         }
 
-        const { data: listData, error: listErr } = await supabaseAdmin.auth.admin.listUsers();
+        const { data: listData, error: listErr } = await supabaseAdmin.auth.admin.listUsers({ perPage: 1000 });
         if (listErr) {
             throw new BadRequestException(listErr.message);
         }
@@ -240,7 +258,9 @@ export class AuthService {
 
         const actionLink = linkData.properties.action_link;
 
-        await this.mailService.sendVerificationEmail(normalizedEmail, actionLink);
+        this.mailService.sendVerificationEmail(normalizedEmail, actionLink).catch(mErr => {
+            this.logger.error(`Background resend verification email failed for ${normalizedEmail}:`, mErr?.message || mErr);
+        });
 
         return {
             success: true,
@@ -258,7 +278,7 @@ export class AuthService {
             callbackUrl = `${callbackUrl.replace(/\/$/, '')}/create-new-password`;
         }
 
-        const { data: listData, error: listErr } = await supabaseAdmin.auth.admin.listUsers();
+        const { data: listData, error: listErr } = await supabaseAdmin.auth.admin.listUsers({ perPage: 1000 });
         if (listErr) {
             throw new BadRequestException(listErr.message);
         }
@@ -280,7 +300,9 @@ export class AuthService {
 
         const actionLink = linkData.properties.action_link;
 
-        await this.mailService.sendPasswordResetEmail(normalizedEmail, actionLink);
+        this.mailService.sendPasswordResetEmail(normalizedEmail, actionLink).catch(mErr => {
+            this.logger.error(`Background password reset email failed for ${normalizedEmail}:`, mErr?.message || mErr);
+        });
 
         return {
             success: true,

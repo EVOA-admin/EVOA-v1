@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import * as nodemailer from 'nodemailer';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -8,7 +8,7 @@ export class MailService implements OnModuleInit {
   private readonly logger = new Logger(MailService.name);
 
   async onModuleInit() {
-    this.logger.log('MailService initialized with cloud failover & STARTTLS support');
+    this.logger.log('MailService initialized with resilient cloud delivery');
   }
 
   private getSmtpPass(): string {
@@ -77,9 +77,9 @@ export class MailService implements OnModuleInit {
         secure: c.secure,
         requireTLS: c.port === 587,
         auth: { user, pass },
-        connectionTimeout: 6000,
-        greetingTimeout: 6000,
-        socketTimeout: 8000,
+        connectionTimeout: 4000,
+        greetingTimeout: 4000,
+        socketTimeout: 6000,
         tls: {
           rejectUnauthorized: false,
         },
@@ -90,9 +90,8 @@ export class MailService implements OnModuleInit {
   private async dispatchEmail(mailOptions: nodemailer.SendMailOptions): Promise<boolean> {
     const pass = this.getSmtpPass();
     if (!pass) {
-      const errMsg = 'Email delivery failed: SMTP_PASS is missing in environment variables.';
-      this.logger.error(errMsg);
-      throw new InternalServerErrorException(errMsg);
+      this.logger.error('Email delivery skipped: SMTP_PASS is missing in environment variables.');
+      return false;
     }
 
     const transporters = this.getCandidateTransporters();
@@ -110,117 +109,127 @@ export class MailService implements OnModuleInit {
       }
     }
 
-    this.logger.error(`All SMTP candidates failed to deliver email to ${mailOptions.to}:`, lastErr);
-    throw lastErr || new InternalServerErrorException('Email delivery failed after all connection attempts.');
+    this.logger.error(`All SMTP candidates failed to deliver email to ${mailOptions.to}: ${lastErr?.message || lastErr}`);
+    return false;
   }
 
   async sendVerificationEmail(to: string, verificationLink: string): Promise<boolean> {
-    const from = this.getFromAddress();
-    const htmlContent = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta charset="utf-8">
-        <title>Verify your EVOA Account</title>
-      </head>
-      <body style="font-family: Arial, sans-serif; background-color: #0D1B2A; color: #E2E8F0; padding: 40px 20px; margin: 0;">
-        <div style="max-width: 540px; margin: 0 auto; background: #162032; border: 1px solid rgba(255,255,255,0.08); padding: 40px 32px; border-radius: 16px; box-shadow: 0 12px 48px rgba(0,0,0,0.5);">
-          <div style="text-align: center; margin-bottom: 24px;">
-            <h1 style="font-family: Arial, sans-serif; font-size: 30px; font-weight: 800; letter-spacing: 1px; color: #E2E8F0; margin: 0;">
-              EVO<span style="color: #3B82F6;">-A</span>
-            </h1>
-            <p style="font-family: monospace; font-size: 10px; letter-spacing: 3px; color: #64748B; text-transform: uppercase; margin-top: 6px;">
-              Startup · Investor · Ecosystem
+    try {
+      const from = this.getFromAddress();
+      const htmlContent = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <title>Verify your EVOA Account</title>
+        </head>
+        <body style="font-family: Arial, sans-serif; background-color: #0D1B2A; color: #E2E8F0; padding: 40px 20px; margin: 0;">
+          <div style="max-width: 540px; margin: 0 auto; background: #162032; border: 1px solid rgba(255,255,255,0.08); padding: 40px 32px; border-radius: 16px; box-shadow: 0 12px 48px rgba(0,0,0,0.5);">
+            <div style="text-align: center; margin-bottom: 24px;">
+              <h1 style="font-family: Arial, sans-serif; font-size: 30px; font-weight: 800; letter-spacing: 1px; color: #E2E8F0; margin: 0;">
+                EVO<span style="color: #3B82F6;">-A</span>
+              </h1>
+              <p style="font-family: monospace; font-size: 10px; letter-spacing: 3px; color: #64748B; text-transform: uppercase; margin-top: 6px;">
+                Startup · Investor · Ecosystem
+              </p>
+            </div>
+            
+            <div style="text-align: center; margin-bottom: 24px;">
+              <h2 style="font-size: 22px; font-weight: 700; color: #E2E8F0; margin: 0 0 10px 0;">Verify Your Email Address</h2>
+              <p style="font-size: 14px; color: #94A3B8; line-height: 1.6; margin: 0;">
+                Welcome to EVOA! Please confirm your email address by clicking the button below to activate your account.
+              </p>
+            </div>
+            
+            <div style="text-align: center; margin: 32px 0;">
+              <a href="${verificationLink}" style="background-color: #3B82F6; color: #FFFFFF; text-decoration: none; padding: 14px 32px; font-weight: 600; font-size: 14px; letter-spacing: 0.5px; display: inline-block; border-radius: 8px; box-shadow: 0 4px 16px rgba(59,130,246,0.3);">
+                Verify Email Address
+              </a>
+            </div>
+            
+            <p style="font-size: 12px; color: #64748B; line-height: 1.5; text-align: center; word-break: break-all; margin-top: 24px;">
+              If the button doesn't work, copy and paste this link into your browser:<br>
+              <a href="${verificationLink}" style="color: #60A5FA; text-decoration: underline;">${verificationLink}</a>
+            </p>
+            
+            <hr style="border: none; border-top: 1px solid rgba(255,255,255,0.08); margin: 32px 0 16px 0;">
+            <p style="font-size: 11px; color: #64748B; text-align: center; margin: 0;">
+              If you didn't create an account with EVOA, you can safely ignore this email.
             </p>
           </div>
-          
-          <div style="text-align: center; margin-bottom: 24px;">
-            <h2 style="font-size: 22px; font-weight: 700; color: #E2E8F0; margin: 0 0 10px 0;">Verify Your Email Address</h2>
-            <p style="font-size: 14px; color: #94A3B8; line-height: 1.6; margin: 0;">
-              Welcome to EVOA! Please confirm your email address by clicking the button below to activate your account.
-            </p>
-          </div>
-          
-          <div style="text-align: center; margin: 32px 0;">
-            <a href="${verificationLink}" style="background-color: #3B82F6; color: #FFFFFF; text-decoration: none; padding: 14px 32px; font-weight: 600; font-size: 14px; letter-spacing: 0.5px; display: inline-block; border-radius: 8px; box-shadow: 0 4px 16px rgba(59,130,246,0.3);">
-              Verify Email Address
-            </a>
-          </div>
-          
-          <p style="font-size: 12px; color: #64748B; line-height: 1.5; text-align: center; word-break: break-all; margin-top: 24px;">
-            If the button doesn't work, copy and paste this link into your browser:<br>
-            <a href="${verificationLink}" style="color: #60A5FA; text-decoration: underline;">${verificationLink}</a>
-          </p>
-          
-          <hr style="border: none; border-top: 1px solid rgba(255,255,255,0.08); margin: 32px 0 16px 0;">
-          <p style="font-size: 11px; color: #64748B; text-align: center; margin: 0;">
-            If you didn't create an account with EVOA, you can safely ignore this email.
-          </p>
-        </div>
-      </body>
-      </html>
-    `;
+        </body>
+        </html>
+      `;
 
-    return this.dispatchEmail({
-      from,
-      to,
-      subject: 'Verify your EVOA account',
-      html: htmlContent,
-    });
+      return await this.dispatchEmail({
+        from,
+        to,
+        subject: 'Verify your EVOA account',
+        html: htmlContent,
+      });
+    } catch (err) {
+      this.logger.error(`sendVerificationEmail error for ${to}: ${err?.message || err}`);
+      return false;
+    }
   }
 
   async sendPasswordResetEmail(to: string, resetLink: string): Promise<boolean> {
-    const from = this.getFromAddress();
-    const htmlContent = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta charset="utf-8">
-        <title>Reset your EVOA Password</title>
-      </head>
-      <body style="font-family: Arial, sans-serif; background-color: #0D1B2A; color: #E2E8F0; padding: 40px 20px; margin: 0;">
-        <div style="max-width: 540px; margin: 0 auto; background: #162032; border: 1px solid rgba(255,255,255,0.08); padding: 40px 32px; border-radius: 16px; box-shadow: 0 12px 48px rgba(0,0,0,0.5);">
-          <div style="text-align: center; margin-bottom: 24px;">
-            <h1 style="font-family: Arial, sans-serif; font-size: 30px; font-weight: 800; letter-spacing: 1px; color: #E2E8F0; margin: 0;">
-              EVO<span style="color: #3B82F6;">-A</span>
-            </h1>
-            <p style="font-family: monospace; font-size: 10px; letter-spacing: 3px; color: #64748B; text-transform: uppercase; margin-top: 6px;">
-              Startup · Investor · Ecosystem
+    try {
+      const from = this.getFromAddress();
+      const htmlContent = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <title>Reset your EVOA Password</title>
+        </head>
+        <body style="font-family: Arial, sans-serif; background-color: #0D1B2A; color: #E2E8F0; padding: 40px 20px; margin: 0;">
+          <div style="max-width: 540px; margin: 0 auto; background: #162032; border: 1px solid rgba(255,255,255,0.08); padding: 40px 32px; border-radius: 16px; box-shadow: 0 12px 48px rgba(0,0,0,0.5);">
+            <div style="text-align: center; margin-bottom: 24px;">
+              <h1 style="font-family: Arial, sans-serif; font-size: 30px; font-weight: 800; letter-spacing: 1px; color: #E2E8F0; margin: 0;">
+                EVO<span style="color: #3B82F6;">-A</span>
+              </h1>
+              <p style="font-family: monospace; font-size: 10px; letter-spacing: 3px; color: #64748B; text-transform: uppercase; margin-top: 6px;">
+                Startup · Investor · Ecosystem
+              </p>
+            </div>
+            
+            <div style="text-align: center; margin-bottom: 24px;">
+              <h2 style="font-size: 22px; font-weight: 700; color: #E2E8F0; margin: 0 0 10px 0;">Reset Your Password</h2>
+              <p style="font-size: 14px; color: #94A3B8; line-height: 1.6; margin: 0;">
+                We received a request to reset the password for your EVOA account. Click the button below to choose a new password.
+              </p>
+            </div>
+            
+            <div style="text-align: center; margin: 32px 0;">
+              <a href="${resetLink}" style="background-color: #3B82F6; color: #FFFFFF; text-decoration: none; padding: 14px 32px; font-weight: 600; font-size: 14px; letter-spacing: 0.5px; display: inline-block; border-radius: 8px; box-shadow: 0 4px 16px rgba(59,130,246,0.3);">
+                Reset Password
+              </a>
+            </div>
+            
+            <p style="font-size: 12px; color: #64748B; line-height: 1.5; text-align: center; word-break: break-all; margin-top: 24px;">
+              If the button doesn't work, copy and paste this link into your browser:<br>
+              <a href="${resetLink}" style="color: #60A5FA; text-decoration: underline;">${resetLink}</a>
+            </p>
+            
+            <hr style="border: none; border-top: 1px solid rgba(255,255,255,0.08); margin: 32px 0 16px 0;">
+            <p style="font-size: 11px; color: #64748B; text-align: center; margin: 0;">
+              If you didn't request a password reset, you can safely ignore this email.
             </p>
           </div>
-          
-          <div style="text-align: center; margin-bottom: 24px;">
-            <h2 style="font-size: 22px; font-weight: 700; color: #E2E8F0; margin: 0 0 10px 0;">Reset Your Password</h2>
-            <p style="font-size: 14px; color: #94A3B8; line-height: 1.6; margin: 0;">
-              We received a request to reset the password for your EVOA account. Click the button below to choose a new password.
-            </p>
-          </div>
-          
-          <div style="text-align: center; margin: 32px 0;">
-            <a href="${resetLink}" style="background-color: #3B82F6; color: #FFFFFF; text-decoration: none; padding: 14px 32px; font-weight: 600; font-size: 14px; letter-spacing: 0.5px; display: inline-block; border-radius: 8px; box-shadow: 0 4px 16px rgba(59,130,246,0.3);">
-              Reset Password
-            </a>
-          </div>
-          
-          <p style="font-size: 12px; color: #64748B; line-height: 1.5; text-align: center; word-break: break-all; margin-top: 24px;">
-            If the button doesn't work, copy and paste this link into your browser:<br>
-            <a href="${resetLink}" style="color: #60A5FA; text-decoration: underline;">${resetLink}</a>
-          </p>
-          
-          <hr style="border: none; border-top: 1px solid rgba(255,255,255,0.08); margin: 32px 0 16px 0;">
-          <p style="font-size: 11px; color: #64748B; text-align: center; margin: 0;">
-            If you didn't request a password reset, you can safely ignore this email.
-          </p>
-        </div>
-      </body>
-      </html>
-    `;
+        </body>
+        </html>
+      `;
 
-    return this.dispatchEmail({
-      from,
-      to,
-      subject: 'Reset your EVOA account password',
-      html: htmlContent,
-    });
+      return await this.dispatchEmail({
+        from,
+        to,
+        subject: 'Reset your EVOA account password',
+        html: htmlContent,
+      });
+    } catch (err) {
+      this.logger.error(`sendPasswordResetEmail error for ${to}: ${err?.message || err}`);
+      return false;
+    }
   }
 }
