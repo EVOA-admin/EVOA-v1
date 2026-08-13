@@ -188,8 +188,10 @@ export class AuthService {
 
         const actionLink = linkData.properties.action_link;
 
-        // Deliver email via Zoho Mail with automatic multi-port/host fallback
-        await this.mailService.sendVerificationEmail(normalizedEmail, actionLink);
+        // Deliver email via Zoho Mail asynchronously so cloud network/SMTP latency NEVER blocks registration response
+        this.mailService.sendVerificationEmail(normalizedEmail, actionLink).catch(err => {
+            this.logger.error(`Background email delivery failed for ${normalizedEmail}:`, err?.message || err);
+        });
 
         return {
             success: true,
@@ -240,7 +242,9 @@ export class AuthService {
 
         const actionLink = linkData.properties.action_link;
 
-        await this.mailService.sendVerificationEmail(normalizedEmail, actionLink);
+        this.mailService.sendVerificationEmail(normalizedEmail, actionLink).catch(err => {
+            this.logger.error(`Background resend verification email failed for ${normalizedEmail}:`, err?.message || err);
+        });
 
         return {
             success: true,
@@ -279,7 +283,10 @@ export class AuthService {
         }
 
         const actionLink = linkData.properties.action_link;
-        await this.mailService.sendPasswordResetEmail(normalizedEmail, actionLink);
+
+        this.mailService.sendPasswordResetEmail(normalizedEmail, actionLink).catch(err => {
+            this.logger.error(`Background password reset email failed for ${normalizedEmail}:`, err?.message || err);
+        });
 
         return {
             success: true,
