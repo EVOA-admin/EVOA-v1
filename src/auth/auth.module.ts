@@ -9,12 +9,12 @@ import { JwtStrategy } from './strategies/jwt.strategy';
 import { GoogleStrategy } from './strategies/google.strategy';
 // import { SupabaseAuthGuard } from './guards/supabase-auth.guard'; // Removed
 import { AuthGuardModule } from './auth-guard.module';
+import { MailModule } from '../mail/mail.module';
 import { UsersModule } from '../users/users.module';
-// import { User } from '../users/entities/user.entity'; // Removed
 
 @Module({
     imports: [
-        // TypeOrmModule.forFeature([User]), // Moved to AuthGuardModule
+        MailModule,
         UsersModule, // No more forwardRef needed
         AuthGuardModule,
         PassportModule.register({ defaultStrategy: 'jwt' }),

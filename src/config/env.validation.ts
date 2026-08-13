@@ -90,6 +90,46 @@ class EnvironmentVariables {
     @IsOptional()
     @IsString()
     REDIS_USE_URL: string = '';
+
+    @IsOptional()
+    @IsString()
+    SMTP_HOST?: string;
+
+    @IsOptional()
+    @IsString()
+    SMTP_PORT?: string;
+
+    @IsOptional()
+    @IsString()
+    SMTP_USER?: string;
+
+    @IsOptional()
+    @IsString()
+    SMTP_PASS?: string;
+
+    @IsOptional()
+    @IsString()
+    SMTP_FROM?: string;
+
+    @IsOptional()
+    @IsString()
+    MAIL_HOST?: string;
+
+    @IsOptional()
+    @IsString()
+    MAIL_PORT?: string;
+
+    @IsOptional()
+    @IsString()
+    MAIL_USER?: string;
+
+    @IsOptional()
+    @IsString()
+    MAIL_PASS?: string;
+
+    @IsOptional()
+    @IsString()
+    MAIL_FROM?: string;
 }
 
 export function validate(config: Record<string, unknown>) {

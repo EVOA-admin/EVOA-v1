@@ -43,3 +43,35 @@ export class ForgotPasswordDto {
     @IsEmail()
     email: string;
 }
+
+export class RegisterDto {
+    @ApiProperty({ example: 'user@example.com' })
+    @IsEmail()
+    email: string;
+
+    @ApiProperty({ example: 'SecurePassword123!' })
+    @IsString()
+    @MinLength(6)
+    password: string;
+
+    @ApiPropertyOptional()
+    @IsOptional()
+    metadata?: Record<string, any>;
+
+    @ApiPropertyOptional({ example: 'http://localhost:5173/auth/callback' })
+    @IsOptional()
+    @IsString()
+    redirectTo?: string;
+}
+
+export class ResendVerificationDto {
+    @ApiProperty({ example: 'user@example.com' })
+    @IsEmail()
+    email: string;
+
+    @ApiPropertyOptional({ example: 'http://localhost:5173/auth/callback' })
+    @IsOptional()
+    @IsString()
+    redirectTo?: string;
+}
+

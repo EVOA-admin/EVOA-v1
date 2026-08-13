@@ -6,6 +6,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { dataSourceOptions } from './config/database.config';
 import { validate } from './config/env.validation';
 import { RedisModule } from './config/redis.module';
+import { MailModule } from './mail/mail.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { ReelsModule } from './reels/reels.module';
@@ -44,6 +45,7 @@ import { EventsModule } from './events/events.module';
             },
         ]),
         RedisModule,
+        MailModule,
         AuthModule,
         UsersModule,
         ReelsModule,
