@@ -8,13 +8,14 @@ export class MailService implements OnModuleInit {
   private readonly logger = new Logger(MailService.name);
 
   async onModuleInit() {
-    this.logger.log('MailService initialized for Zoho SMTP delivery');
+    this.logger.log('MailService initialized with cloud failover & STARTTLS support');
   }
 
   private getSmtpPass(): string {
-    if (process.env.SMTP_PASS && process.env.SMTP_PASS.trim()) {
-      return process.env.SMTP_PASS.trim();
-    }
+    const rawPass = process.env.SMTP_PASS || '';
+    const cleanedPass = rawPass.trim().replace(/^["']|["']$/g, '');
+    if (cleanedPass) return cleanedPass;
+
     try {
       const envPath = path.resolve(process.cwd(), '.env');
       if (fs.existsSync(envPath)) {
@@ -32,18 +33,31 @@ export class MailService implements OnModuleInit {
     return '';
   }
 
+  private getFromAddress(): string {
+    const user = (process.env.SMTP_USER || 'admin@evoa.co.in').trim();
+    const rawFrom = (process.env.SMTP_FROM || process.env.MAIL_FROM || '').trim();
+    if (rawFrom) {
+      const cleaned = rawFrom.replace(/^["']|["']$/g, '');
+      if (cleaned.includes('<') && cleaned.includes('>')) {
+        return cleaned;
+      }
+    }
+    return `"EVOA Support" <${user}>`;
+  }
+
   private getCandidateTransporters(): nodemailer.Transporter[] {
     const pass = this.getSmtpPass();
-    const user = process.env.SMTP_USER || 'admin@evoa.co.in';
-    const primaryHost = process.env.SMTP_HOST || 'smtp.zoho.in';
+    const user = (process.env.SMTP_USER || 'admin@evoa.co.in').trim();
+    const primaryHost = (process.env.SMTP_HOST || 'smtp.zoho.in').trim();
     const primaryPort = parseInt(process.env.SMTP_PORT || '465', 10);
-    const primarySecure = process.env.SMTP_SECURE !== 'false';
+    const primarySecure = process.env.SMTP_SECURE !== 'false' && primaryPort !== 587;
 
     const configs = [
       { host: primaryHost, port: primaryPort, secure: primarySecure },
-      { host: 'smtp.zoho.in', port: 465, secure: true },
-      { host: 'smtp.zoho.in', port: 587, secure: false },
+      { host: primaryHost, port: 587, secure: false },
       { host: 'smtppro.zoho.in', port: 465, secure: true },
+      { host: 'smtp.zoho.in', port: 465, secure: true },
+      { host: 'smtppro.zoho.com', port: 465, secure: true },
       { host: 'smtp.zoho.com', port: 465, secure: true },
       { host: 'smtp.zoho.com', port: 587, secure: false },
     ];
@@ -63,12 +77,12 @@ export class MailService implements OnModuleInit {
         secure: c.secure,
         requireTLS: c.port === 587,
         auth: { user, pass },
+        connectionTimeout: 6000,
+        greetingTimeout: 6000,
+        socketTimeout: 8000,
         tls: {
           rejectUnauthorized: false,
         },
-        connectionTimeout: 8000,
-        greetingTimeout: 8000,
-        socketTimeout: 10000,
       })
     );
   }
@@ -85,13 +99,14 @@ export class MailService implements OnModuleInit {
     let lastErr: any = null;
 
     for (const transporter of transporters) {
+      const options = transporter.options as any;
       try {
         const info = await transporter.sendMail(mailOptions);
-        this.logger.log(`Email delivered to ${mailOptions.to} via Zoho SMTP: ${info.messageId}`);
+        this.logger.log(`Email delivered to ${mailOptions.to} via ${options.host}:${options.port} [Message-ID: ${info.messageId}]`);
         return true;
       } catch (err) {
         lastErr = err;
-        this.logger.warn(`SMTP candidate (${(transporter.options as any).host}:${(transporter.options as any).port}) failed for ${mailOptions.to}: ${err.message}`);
+        this.logger.warn(`SMTP candidate ${options.host}:${options.port} (secure=${options.secure}) failed for ${mailOptions.to}: ${err.message}`);
       }
     }
 
@@ -100,7 +115,7 @@ export class MailService implements OnModuleInit {
   }
 
   async sendVerificationEmail(to: string, verificationLink: string): Promise<boolean> {
-    const from = process.env.SMTP_FROM || process.env.MAIL_FROM || '"EVOA Support" <admin@evoa.co.in>';
+    const from = this.getFromAddress();
     const htmlContent = `
       <!DOCTYPE html>
       <html>
@@ -155,7 +170,7 @@ export class MailService implements OnModuleInit {
   }
 
   async sendPasswordResetEmail(to: string, resetLink: string): Promise<boolean> {
-    const from = process.env.SMTP_FROM || process.env.MAIL_FROM || '"EVOA Support" <admin@evoa.co.in>';
+    const from = this.getFromAddress();
     const htmlContent = `
       <!DOCTYPE html>
       <html>

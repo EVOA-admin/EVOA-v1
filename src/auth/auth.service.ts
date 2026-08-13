@@ -188,13 +188,8 @@ export class AuthService {
 
         const actionLink = linkData.properties.action_link;
 
-        // Deliver email via Zoho Mail with try/catch safeguard so email transmission is guaranteed and errors never crash HTTP request
-        try {
-            await this.mailService.sendVerificationEmail(normalizedEmail, actionLink);
-            this.logger.log(`Verification email successfully delivered to ${normalizedEmail}`);
-        } catch (emailErr) {
-            this.logger.error(`Email delivery notice for ${normalizedEmail}:`, emailErr?.message || emailErr);
-        }
+        // Deliver email via Zoho Mail
+        await this.mailService.sendVerificationEmail(normalizedEmail, actionLink);
 
         return {
             success: true,
@@ -245,12 +240,7 @@ export class AuthService {
 
         const actionLink = linkData.properties.action_link;
 
-        try {
-            await this.mailService.sendVerificationEmail(normalizedEmail, actionLink);
-            this.logger.log(`Resend verification email successfully delivered to ${normalizedEmail}`);
-        } catch (emailErr) {
-            this.logger.error(`Resend email delivery notice for ${normalizedEmail}:`, emailErr?.message || emailErr);
-        }
+        await this.mailService.sendVerificationEmail(normalizedEmail, actionLink);
 
         return {
             success: true,
@@ -290,12 +280,7 @@ export class AuthService {
 
         const actionLink = linkData.properties.action_link;
 
-        try {
-            await this.mailService.sendPasswordResetEmail(normalizedEmail, actionLink);
-            this.logger.log(`Password reset email successfully delivered to ${normalizedEmail}`);
-        } catch (emailErr) {
-            this.logger.error(`Password reset email notice for ${normalizedEmail}:`, emailErr?.message || emailErr);
-        }
+        await this.mailService.sendPasswordResetEmail(normalizedEmail, actionLink);
 
         return {
             success: true,
