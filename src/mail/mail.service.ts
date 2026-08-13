@@ -269,42 +269,56 @@ export class MailService implements OnModuleInit {
         <html>
         <head>
           <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
           <title>Verify your EVOA Account</title>
         </head>
-        <body style="font-family: Arial, sans-serif; background-color: #0D1B2A; color: #E2E8F0; padding: 40px 20px; margin: 0;">
-          <div style="max-width: 540px; margin: 0 auto; background: #162032; border: 1px solid rgba(255,255,255,0.08); padding: 40px 32px; border-radius: 16px; box-shadow: 0 12px 48px rgba(0,0,0,0.5);">
-            <div style="text-align: center; margin-bottom: 24px;">
-              <h1 style="font-family: Arial, sans-serif; font-size: 30px; font-weight: 800; letter-spacing: 1px; color: #E2E8F0; margin: 0;">
-                EVO<span style="color: #3B82F6;">-A</span>
-              </h1>
-              <p style="font-family: monospace; font-size: 10px; letter-spacing: 3px; color: #64748B; text-transform: uppercase; margin-top: 6px;">
-                Startup · Investor · Ecosystem
-              </p>
-            </div>
-            
-            <div style="text-align: center; margin-bottom: 24px;">
-              <h2 style="font-size: 22px; font-weight: 700; color: #E2E8F0; margin: 0 0 10px 0;">Verify Your Email Address</h2>
-              <p style="font-size: 14px; color: #94A3B8; line-height: 1.6; margin: 0;">
-                Welcome to EVOA! Please confirm your email address by clicking the button below to activate your account.
-              </p>
-            </div>
-            
-            <div style="text-align: center; margin: 32px 0;">
-              <a href="${verificationLink}" style="background-color: #3B82F6; color: #FFFFFF; text-decoration: none; padding: 14px 32px; font-weight: 600; font-size: 14px; letter-spacing: 0.5px; display: inline-block; border-radius: 8px; box-shadow: 0 4px 16px rgba(59,130,246,0.3);">
-                Verify Email Address
-              </a>
-            </div>
-            
-            <p style="font-size: 12px; color: #64748B; line-height: 1.5; text-align: center; word-break: break-all; margin-top: 24px;">
-              If the button doesn't work, copy and paste this link into your browser:<br>
-              <a href="${verificationLink}" style="color: #60A5FA; text-decoration: underline;">${verificationLink}</a>
-            </p>
-            
-            <hr style="border: none; border-top: 1px solid rgba(255,255,255,0.08); margin: 32px 0 16px 0;">
-            <p style="font-size: 11px; color: #64748B; text-align: center; margin: 0;">
-              If you didn't create an account with EVOA, you can safely ignore this email.
-            </p>
-          </div>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #F8FAFC; color: #0F172A; padding: 40px 20px; margin: 0;">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width: 560px; margin: 0 auto; background-color: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 16px; box-shadow: 0 4px 24px rgba(15, 23, 42, 0.06); overflow: hidden;">
+            <tr>
+              <td style="padding: 40px 36px;">
+                <!-- Brand Header -->
+                <div style="text-align: center; margin-bottom: 28px;">
+                  <h1 style="font-size: 30px; font-weight: 800; letter-spacing: 0.5px; color: #0F172A; margin: 0;">
+                    EVO<span style="color: #2563EB;">-A</span>
+                  </h1>
+                  <p style="font-family: 'SF Mono', Menlo, Consolas, Monaco, monospace; font-size: 10px; letter-spacing: 2.5px; color: #64748B; text-transform: uppercase; margin: 6px 0 0 0;">
+                    Startup · Investor · Ecosystem
+                  </p>
+                </div>
+                
+                <!-- Main Message -->
+                <div style="text-align: center; margin-bottom: 28px;">
+                  <h2 style="font-size: 22px; font-weight: 700; color: #0F172A; margin: 0 0 12px 0;">Verify Your Email Address</h2>
+                  <p style="font-size: 15px; color: #475569; line-height: 1.6; margin: 0;">
+                    Welcome to EVOA! Please confirm your email address by clicking the button below to activate your account and access the platform.
+                  </p>
+                </div>
+                
+                <!-- Action Button -->
+                <div style="text-align: center; margin: 32px 0;">
+                  <a href="${verificationLink}" style="background-color: #2563EB; color: #FFFFFF; text-decoration: none; padding: 14px 34px; font-weight: 600; font-size: 15px; letter-spacing: 0.3px; display: inline-block; border-radius: 10px; box-shadow: 0 4px 14px rgba(37, 99, 235, 0.28);">
+                    Verify Email Address
+                  </a>
+                </div>
+                
+                <!-- Fallback URL -->
+                <div style="background-color: #F1F5F9; border-radius: 8px; padding: 14px 16px; margin-top: 28px;">
+                  <p style="font-size: 12px; color: #64748B; line-height: 1.5; margin: 0 0 6px 0; text-align: center;">
+                    If the button doesn't work, copy and paste this link into your browser:
+                  </p>
+                  <p style="font-size: 12px; line-height: 1.4; margin: 0; text-align: center; word-break: break-all;">
+                    <a href="${verificationLink}" style="color: #2563EB; text-decoration: underline;">${verificationLink}</a>
+                  </p>
+                </div>
+                
+                <hr style="border: none; border-top: 1px solid #E2E8F0; margin: 32px 0 20px 0;">
+                
+                <p style="font-size: 12px; color: #94A3B8; text-align: center; line-height: 1.5; margin: 0;">
+                  If you didn't create an account with EVOA, you can safely ignore this email.
+                </p>
+              </td>
+            </tr>
+          </table>
         </body>
         </html>
       `;
@@ -329,42 +343,56 @@ export class MailService implements OnModuleInit {
         <html>
         <head>
           <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
           <title>Reset your EVOA Password</title>
         </head>
-        <body style="font-family: Arial, sans-serif; background-color: #0D1B2A; color: #E2E8F0; padding: 40px 20px; margin: 0;">
-          <div style="max-width: 540px; margin: 0 auto; background: #162032; border: 1px solid rgba(255,255,255,0.08); padding: 40px 32px; border-radius: 16px; box-shadow: 0 12px 48px rgba(0,0,0,0.5);">
-            <div style="text-align: center; margin-bottom: 24px;">
-              <h1 style="font-family: Arial, sans-serif; font-size: 30px; font-weight: 800; letter-spacing: 1px; color: #E2E8F0; margin: 0;">
-                EVO<span style="color: #3B82F6;">-A</span>
-              </h1>
-              <p style="font-family: monospace; font-size: 10px; letter-spacing: 3px; color: #64748B; text-transform: uppercase; margin-top: 6px;">
-                Startup · Investor · Ecosystem
-              </p>
-            </div>
-            
-            <div style="text-align: center; margin-bottom: 24px;">
-              <h2 style="font-size: 22px; font-weight: 700; color: #E2E8F0; margin: 0 0 10px 0;">Reset Your Password</h2>
-              <p style="font-size: 14px; color: #94A3B8; line-height: 1.6; margin: 0;">
-                We received a request to reset the password for your EVOA account. Click the button below to choose a new password.
-              </p>
-            </div>
-            
-            <div style="text-align: center; margin: 32px 0;">
-              <a href="${resetLink}" style="background-color: #3B82F6; color: #FFFFFF; text-decoration: none; padding: 14px 32px; font-weight: 600; font-size: 14px; letter-spacing: 0.5px; display: inline-block; border-radius: 8px; box-shadow: 0 4px 16px rgba(59,130,246,0.3);">
-                Reset Password
-              </a>
-            </div>
-            
-            <p style="font-size: 12px; color: #64748B; line-height: 1.5; text-align: center; word-break: break-all; margin-top: 24px;">
-              If the button doesn't work, copy and paste this link into your browser:<br>
-              <a href="${resetLink}" style="color: #60A5FA; text-decoration: underline;">${resetLink}</a>
-            </p>
-            
-            <hr style="border: none; border-top: 1px solid rgba(255,255,255,0.08); margin: 32px 0 16px 0;">
-            <p style="font-size: 11px; color: #64748B; text-align: center; margin: 0;">
-              If you didn't request a password reset, you can safely ignore this email.
-            </p>
-          </div>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #F8FAFC; color: #0F172A; padding: 40px 20px; margin: 0;">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width: 560px; margin: 0 auto; background-color: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 16px; box-shadow: 0 4px 24px rgba(15, 23, 42, 0.06); overflow: hidden;">
+            <tr>
+              <td style="padding: 40px 36px;">
+                <!-- Brand Header -->
+                <div style="text-align: center; margin-bottom: 28px;">
+                  <h1 style="font-size: 30px; font-weight: 800; letter-spacing: 0.5px; color: #0F172A; margin: 0;">
+                    EVO<span style="color: #2563EB;">-A</span>
+                  </h1>
+                  <p style="font-family: 'SF Mono', Menlo, Consolas, Monaco, monospace; font-size: 10px; letter-spacing: 2.5px; color: #64748B; text-transform: uppercase; margin: 6px 0 0 0;">
+                    Startup · Investor · Ecosystem
+                  </p>
+                </div>
+                
+                <!-- Main Message -->
+                <div style="text-align: center; margin-bottom: 28px;">
+                  <h2 style="font-size: 22px; font-weight: 700; color: #0F172A; margin: 0 0 12px 0;">Reset Your Password</h2>
+                  <p style="font-size: 15px; color: #475569; line-height: 1.6; margin: 0;">
+                    We received a request to reset the password for your EVOA account. Click the button below to choose a new password.
+                  </p>
+                </div>
+                
+                <!-- Action Button -->
+                <div style="text-align: center; margin: 32px 0;">
+                  <a href="${resetLink}" style="background-color: #2563EB; color: #FFFFFF; text-decoration: none; padding: 14px 34px; font-weight: 600; font-size: 15px; letter-spacing: 0.3px; display: inline-block; border-radius: 10px; box-shadow: 0 4px 14px rgba(37, 99, 235, 0.28);">
+                    Reset Password
+                  </a>
+                </div>
+                
+                <!-- Fallback URL -->
+                <div style="background-color: #F1F5F9; border-radius: 8px; padding: 14px 16px; margin-top: 28px;">
+                  <p style="font-size: 12px; color: #64748B; line-height: 1.5; margin: 0 0 6px 0; text-align: center;">
+                    If the button doesn't work, copy and paste this link into your browser:
+                  </p>
+                  <p style="font-size: 12px; line-height: 1.4; margin: 0; text-align: center; word-break: break-all;">
+                    <a href="${resetLink}" style="color: #2563EB; text-decoration: underline;">${resetLink}</a>
+                  </p>
+                </div>
+                
+                <hr style="border: none; border-top: 1px solid #E2E8F0; margin: 32px 0 20px 0;">
+                
+                <p style="font-size: 12px; color: #94A3B8; text-align: center; line-height: 1.5; margin: 0;">
+                  If you didn't request a password reset, you can safely ignore this email.
+                </p>
+              </td>
+            </tr>
+          </table>
         </body>
         </html>
       `;
