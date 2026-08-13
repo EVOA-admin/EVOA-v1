@@ -173,13 +173,14 @@ export class AuthService {
                         }
 
                         const actionLink = reLinkData.properties.action_link;
-                        this.mailService.sendVerificationEmail(normalizedEmail, actionLink).catch(mErr => {
-                            this.logger.error(`Background email delivery failed for ${normalizedEmail}:`, mErr?.message || mErr);
-                        });
+                        const emailSent = await this.mailService.sendVerificationEmail(normalizedEmail, actionLink);
 
                         return {
                             success: true,
-                            message: 'Verification email sent. Check your inbox.',
+                            emailSent,
+                            message: emailSent
+                                ? 'Verification email sent. Check your inbox.'
+                                : 'Account exists. Please check your inbox or click Resend Verification.',
                             user: { id: user.id, email: user.email },
                         };
                     } else {
@@ -197,14 +198,15 @@ export class AuthService {
             user = linkData.user;
             const actionLink = linkData.properties.action_link;
 
-            // Deliver email via Zoho Mail in background — registration API responds instantly in ~150ms
-            this.mailService.sendVerificationEmail(normalizedEmail, actionLink).catch(mErr => {
-                this.logger.error(`Background email delivery failed for ${normalizedEmail}:`, mErr?.message || mErr);
-            });
+            // Deliver email via Zoho Mail immediately after account creation (~1 second)
+            const emailSent = await this.mailService.sendVerificationEmail(normalizedEmail, actionLink);
 
             return {
                 success: true,
-                message: 'Verification email sent. Check your inbox.',
+                emailSent,
+                message: emailSent
+                    ? 'Verification email sent. Check your inbox.'
+                    : 'Account created successfully! Verification email delivery is in progress. Please check your inbox.',
                 user: {
                     id: user?.id,
                     email: user?.email,
@@ -258,13 +260,14 @@ export class AuthService {
 
         const actionLink = linkData.properties.action_link;
 
-        this.mailService.sendVerificationEmail(normalizedEmail, actionLink).catch(mErr => {
-            this.logger.error(`Background resend verification email failed for ${normalizedEmail}:`, mErr?.message || mErr);
-        });
+        const emailSent = await this.mailService.sendVerificationEmail(normalizedEmail, actionLink);
 
         return {
             success: true,
-            message: 'Verification email sent! Check your inbox.',
+            emailSent,
+            message: emailSent
+                ? 'Verification email sent! Check your inbox.'
+                : 'Verification email trigger attempted. Please check your inbox.',
         };
     }
 
@@ -300,13 +303,14 @@ export class AuthService {
 
         const actionLink = linkData.properties.action_link;
 
-        this.mailService.sendPasswordResetEmail(normalizedEmail, actionLink).catch(mErr => {
-            this.logger.error(`Background password reset email failed for ${normalizedEmail}:`, mErr?.message || mErr);
-        });
+        const emailSent = await this.mailService.sendPasswordResetEmail(normalizedEmail, actionLink);
 
         return {
             success: true,
-            message: 'Password reset link sent! Check your inbox.',
+            emailSent,
+            message: emailSent
+                ? 'Password reset link sent! Check your inbox.'
+                : 'Password reset email trigger attempted. Please check your inbox.',
         };
     }
 
