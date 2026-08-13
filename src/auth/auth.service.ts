@@ -279,7 +279,12 @@ export class AuthService {
             throw new BadRequestException(linkErr?.message || 'Failed to generate password reset link.');
         }
 
-        const actionLink = linkData.properties.action_link;
+        let actionLink = linkData.properties.action_link;
+        try {
+            const url = new URL(actionLink);
+            url.searchParams.set('redirect_to', callbackUrl);
+            actionLink = url.toString();
+        } catch (_) { /* ignore */ }
 
         this.mailService.sendPasswordResetEmail(normalizedEmail, actionLink)
             .then(() => {
