@@ -295,6 +295,11 @@ export class AuthService {
         };
     }
 
+    async testMailDelivery(email: string) {
+        const targetEmail = (email || 'admin@evoa.co.in').trim().toLowerCase();
+        return this.mailService.testDelivery(targetEmail);
+    }
+
     async validateUser(userId: string): Promise<User> {
         const user = await this.userRepository.findOne({ where: { id: userId } });
         if (!user) {

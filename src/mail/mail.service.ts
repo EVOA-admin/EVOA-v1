@@ -17,7 +17,10 @@ export class MailService implements OnModuleInit {
   private readonly logger = new Logger(MailService.name);
 
   async onModuleInit() {
-    this.logger.log('MailService initialized with multi-candidate SMTP delivery');
+    const hasResend = !!cleanEnvVar(process.env.RESEND_API_KEY);
+    const hasBrevo = !!cleanEnvVar(process.env.BREVO_API_KEY);
+    const hasSmtp = !!this.getSmtpPass();
+    this.logger.log(`MailService initialized (Providers available: Resend=${hasResend}, Brevo=${hasBrevo}, SMTP=${hasSmtp})`);
   }
 
   private getSmtpPass(): string {
@@ -53,6 +56,84 @@ export class MailService implements OnModuleInit {
       return `"${rawFrom}" <${user}>`;
     }
     return `"EVOA Support" <${user}>`;
+  }
+
+  private async sendViaResend(to: string, subject: string, html: string): Promise<{ success: boolean; id?: string; error?: string }> {
+    const apiKey = cleanEnvVar(process.env.RESEND_API_KEY);
+    if (!apiKey) return { success: false, error: 'RESEND_API_KEY not configured' };
+
+    const from = cleanEnvVar(process.env.RESEND_FROM) || this.getFromAddress();
+    try {
+      const res = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          from,
+          to: [to],
+          subject,
+          html,
+        }),
+      });
+
+      const body = await res.json().catch(() => ({}));
+      if (res.ok && body?.id) {
+        this.logger.log(`[MailService] Email delivered to ${to} via Resend HTTPS API [ID: ${body.id}]`);
+        return { success: true, id: body.id };
+      }
+      const errMsg = body?.message || body?.error || `HTTP ${res.status}`;
+      this.logger.warn(`[MailService] Resend API failed: ${errMsg}`);
+      return { success: false, error: errMsg };
+    } catch (err: any) {
+      this.logger.warn(`[MailService] Resend network error: ${err?.message || err}`);
+      return { success: false, error: err?.message || String(err) };
+    }
+  }
+
+  private async sendViaBrevo(to: string, subject: string, html: string): Promise<{ success: boolean; id?: string; error?: string }> {
+    const apiKey = cleanEnvVar(process.env.BREVO_API_KEY);
+    if (!apiKey) return { success: false, error: 'BREVO_API_KEY not configured' };
+
+    const fromRaw = cleanEnvVar(process.env.BREVO_FROM) || this.getFromAddress();
+    let senderName = 'EVOA';
+    let senderEmail = 'admin@evoa.co.in';
+    const match = fromRaw.match(/(?:"?([^"]*)"?\s*)?<([^>]+)>/);
+    if (match) {
+      if (match[1]) senderName = match[1].trim();
+      if (match[2]) senderEmail = match[2].trim();
+    }
+
+    try {
+      const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+        method: 'POST',
+        headers: {
+          'api-key': apiKey,
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: JSON.stringify({
+          sender: { name: senderName, email: senderEmail },
+          to: [{ email: to }],
+          subject,
+          htmlContent: html,
+        }),
+      });
+
+      const body = await res.json().catch(() => ({}));
+      if (res.ok && (body?.messageId || body?.id)) {
+        const id = body.messageId || body.id;
+        this.logger.log(`[MailService] Email delivered to ${to} via Brevo HTTPS API [ID: ${id}]`);
+        return { success: true, id };
+      }
+      const errMsg = body?.message || `HTTP ${res.status}`;
+      this.logger.warn(`[MailService] Brevo API failed: ${errMsg}`);
+      return { success: false, error: errMsg };
+    } catch (err: any) {
+      this.logger.warn(`[MailService] Brevo network error: ${err?.message || err}`);
+      return { success: false, error: err?.message || String(err) };
+    }
   }
 
   private getCandidateTransporters(): nodemailer.Transporter[] {
@@ -93,10 +174,25 @@ export class MailService implements OnModuleInit {
     );
   }
 
-  private async dispatchEmail(mailOptions: nodemailer.SendMailOptions): Promise<boolean> {
+  private async dispatchEmail(mailOptions: { from?: string; to: string; subject: string; html: string }): Promise<boolean> {
+    const to = Array.isArray(mailOptions.to) ? mailOptions.to[0] : String(mailOptions.to);
+
+    // 1. Try Resend HTTPS REST API (Port 443 - never blocked by cloud hosts like Render)
+    if (cleanEnvVar(process.env.RESEND_API_KEY)) {
+      const res = await this.sendViaResend(to, mailOptions.subject, mailOptions.html);
+      if (res.success) return true;
+    }
+
+    // 2. Try Brevo HTTPS REST API (Port 443 - never blocked)
+    if (cleanEnvVar(process.env.BREVO_API_KEY)) {
+      const res = await this.sendViaBrevo(to, mailOptions.subject, mailOptions.html);
+      if (res.success) return true;
+    }
+
+    // 3. Fallback to direct SMTP multi-candidate delivery
     const pass = this.getSmtpPass();
     if (!pass) {
-      const errMsg = 'Email delivery failed: SMTP_PASS is missing in environment variables.';
+      const errMsg = 'Email delivery failed: Neither HTTPS API (RESEND_API_KEY / BREVO_API_KEY) nor SMTP_PASS is configured.';
       this.logger.error(errMsg);
       throw new InternalServerErrorException(errMsg);
     }
@@ -107,8 +203,13 @@ export class MailService implements OnModuleInit {
     for (const transporter of transporters) {
       const options = transporter.options as any;
       try {
-        const info = await transporter.sendMail(mailOptions);
-        this.logger.log(`[MailService] Email delivered to ${mailOptions.to} via ${options.host}:${options.port} [Message-ID: ${info.messageId}]`);
+        const info = await transporter.sendMail({
+          from: mailOptions.from || this.getFromAddress(),
+          to: mailOptions.to,
+          subject: mailOptions.subject,
+          html: mailOptions.html,
+        });
+        this.logger.log(`[MailService] Email delivered to ${mailOptions.to} via SMTP ${options.host}:${options.port} [Message-ID: ${info.messageId}]`);
         return true;
       } catch (err: any) {
         lastErr = err;
@@ -116,8 +217,46 @@ export class MailService implements OnModuleInit {
       }
     }
 
-    this.logger.error(`[MailService] All SMTP delivery candidates failed for ${mailOptions.to}: ${lastErr?.message || lastErr}`);
-    throw lastErr || new InternalServerErrorException('Failed to deliver email via SMTP');
+    this.logger.error(`[MailService] All delivery candidates failed for ${mailOptions.to}: ${lastErr?.message || lastErr}`);
+    throw lastErr || new InternalServerErrorException('Failed to deliver email via available providers');
+  }
+
+  async testDelivery(to: string): Promise<{ success: boolean; details: any }> {
+    const attempts: any[] = [];
+    const from = this.getFromAddress();
+    const subject = 'EVOA Mailer Test Diagnostic';
+    const html = '<p>This is a test diagnostic email sent from EVOA backend.</p>';
+
+    if (cleanEnvVar(process.env.RESEND_API_KEY)) {
+      const res = await this.sendViaResend(to, subject, html);
+      attempts.push({ provider: 'Resend HTTPS API', ...res });
+      if (res.success) return { success: true, details: { method: 'Resend HTTPS API', attempts } };
+    }
+
+    if (cleanEnvVar(process.env.BREVO_API_KEY)) {
+      const res = await this.sendViaBrevo(to, subject, html);
+      attempts.push({ provider: 'Brevo HTTPS API', ...res });
+      if (res.success) return { success: true, details: { method: 'Brevo HTTPS API', attempts } };
+    }
+
+    const pass = this.getSmtpPass();
+    if (pass) {
+      const transporters = this.getCandidateTransporters();
+      for (const t of transporters) {
+        const opt = t.options as any;
+        try {
+          const info = await t.sendMail({ from, to, subject, html });
+          attempts.push({ provider: `SMTP (${opt.host}:${opt.port})`, success: true, messageId: info.messageId });
+          return { success: true, details: { method: `SMTP ${opt.host}:${opt.port}`, attempts } };
+        } catch (e: any) {
+          attempts.push({ provider: `SMTP (${opt.host}:${opt.port})`, success: false, error: e?.message || String(e) });
+        }
+      }
+    } else {
+      attempts.push({ provider: 'SMTP', success: false, error: 'SMTP_PASS not provided' });
+    }
+
+    return { success: false, details: { attempts } };
   }
 
   async sendVerificationEmail(to: string, verificationLink: string): Promise<boolean> {

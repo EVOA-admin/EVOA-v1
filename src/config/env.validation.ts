@@ -129,11 +129,23 @@ class EnvironmentVariables {
 
     @IsOptional()
     @IsString()
-    MAIL_PASS?: string;
+    MAIL_FROM?: string;
 
     @IsOptional()
     @IsString()
-    MAIL_FROM?: string;
+    RESEND_API_KEY?: string;
+
+    @IsOptional()
+    @IsString()
+    RESEND_FROM?: string;
+
+    @IsOptional()
+    @IsString()
+    BREVO_API_KEY?: string;
+
+    @IsOptional()
+    @IsString()
+    BREVO_FROM?: string;
 }
 
 export function validate(config: Record<string, unknown>) {

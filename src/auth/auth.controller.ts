@@ -35,5 +35,12 @@ export class AuthController {
     async forgotPassword(@Body() forgotPasswordDto: ForgotPasswordDto) {
         return this.authService.forgotPassword(forgotPasswordDto);
     }
+
+    @Post('test-mail')
+    @HttpCode(HttpStatus.OK)
+    @ApiOperation({ summary: 'Diagnostic test endpoint to verify email delivery from current environment' })
+    async testMail(@Body('email') email: string) {
+        return this.authService.testMailDelivery(email);
+    }
 }
 
