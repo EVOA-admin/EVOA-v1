@@ -101,6 +101,10 @@ class EnvironmentVariables {
 
     @IsOptional()
     @IsString()
+    SMTP_SECURE?: string;
+
+    @IsOptional()
+    @IsString()
     SMTP_USER?: string;
 
     @IsOptional()

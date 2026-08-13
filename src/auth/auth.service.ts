@@ -10,8 +10,6 @@ import { MailService } from '../mail/mail.service';
 
 @Injectable()
 export class AuthService {
-    private readonly logger = new Logger(AuthService.name);
-
     constructor(
         @InjectRepository(User)
         private readonly userRepository: Repository<User>,
@@ -116,141 +114,73 @@ export class AuthService {
         }
     }
 
+    private readonly logger = new Logger(AuthService.name);
+
     async register(registerDto: RegisterDto) {
-        try {
-            const { email, password, metadata, redirectTo } = registerDto;
-            const normalizedEmail = email.trim().toLowerCase();
-
-            const defaultFrontend = process.env.FRONTEND_URL || 'http://localhost:5173';
-            let callbackUrl = (redirectTo || defaultFrontend).trim();
-            if (!callbackUrl.includes('/auth/callback')) {
-                callbackUrl = `${callbackUrl.replace(/\/$/, '')}/auth/callback`;
-            }
-
-            let user: any = null;
-
-            // Generate signup link (this atomically creates the unverified user in Supabase Auth)
-            const { data: linkData, error: linkErr } = await supabaseAdmin.auth.admin.generateLink({
-                type: 'signup',
-                email: normalizedEmail,
-                password,
-                options: {
-                    redirectTo: callbackUrl,
-                    data: metadata || {},
-                },
-            });
-
-            if (linkErr) {
-                const errMsg = linkErr.message?.toLowerCase() || '';
-                if (errMsg.includes('already registered') || errMsg.includes('already exists') || errMsg.includes('email_exists')) {
-                    // User account already exists in Supabase Auth — check if confirmed or unconfirmed
-                    const { data: listData } = await supabaseAdmin.auth.admin.listUsers({ perPage: 1000 });
-                    const usersList = listData?.users || [];
-                    const existing = usersList.find((u: any) => u.email?.trim().toLowerCase() === normalizedEmail);
-
-                    if (existing) {
-                        if (existing.email_confirmed_at) {
-                            throw new ConflictException('User is already registered and verified. Please log in.');
-                        }
-                        // Existing unverified account — update password/metadata and generate magiclink
-                        const { data: updated, error: updateErr } = await supabaseAdmin.auth.admin.updateUserById(
-                            existing.id,
-                            { password, user_metadata: metadata || {} }
-                        );
-                        if (updateErr) {
-                            throw new BadRequestException(updateErr.message);
-                        }
-                        user = updated.user;
-
-                        const { data: reLinkData, error: reLinkErr } = await supabaseAdmin.auth.admin.generateLink({
-                            type: 'magiclink',
-                            email: normalizedEmail,
-                            options: { redirectTo: callbackUrl },
-                        });
-
-                        if (reLinkErr || !reLinkData?.properties?.action_link) {
-                            throw new BadRequestException(reLinkErr?.message || 'Failed to generate verification link.');
-                        }
-
-                        const actionLink = reLinkData.properties.action_link;
-                        const emailSent = await this.mailService.sendVerificationEmail(normalizedEmail, actionLink);
-
-                        return {
-                            success: true,
-                            emailSent,
-                            message: emailSent
-                                ? 'Verification email sent. Check your inbox.'
-                                : 'Account exists. Please check your inbox or click Resend Verification.',
-                            user: { id: user.id, email: user.email },
-                        };
-                    } else {
-                        throw new ConflictException('User is already registered. Please log in.');
-                    }
-                } else {
-                    throw new BadRequestException(linkErr.message || 'Failed to create user account.');
-                }
-            }
-
-            if (!linkData?.properties?.action_link) {
-                throw new BadRequestException('Failed to generate verification link.');
-            }
-
-            user = linkData.user;
-            const actionLink = linkData.properties.action_link;
-
-            // Deliver email via Zoho Mail immediately after account creation (~1 second)
-            const emailSent = await this.mailService.sendVerificationEmail(normalizedEmail, actionLink);
-
-            return {
-                success: true,
-                emailSent,
-                message: emailSent
-                    ? 'Verification email sent. Check your inbox.'
-                    : 'Account created successfully! Verification email delivery is in progress. Please check your inbox.',
-                user: {
-                    id: user?.id,
-                    email: user?.email,
-                },
-            };
-        } catch (err) {
-            this.logger.error('Registration process error:', err?.message || err);
-            if (err instanceof ConflictException || err instanceof BadRequestException) {
-                throw err;
-            }
-            throw new BadRequestException(err?.message || 'Failed to complete registration.');
-        }
-    }
-
-    async resendVerification(resendDto: ResendVerificationDto) {
-        const { email, redirectTo } = resendDto;
+        const { email, password, metadata, redirectTo } = registerDto;
         const normalizedEmail = email.trim().toLowerCase();
 
-        const defaultFrontend = process.env.FRONTEND_URL || 'http://localhost:5173';
+        const defaultFrontend = (process.env.FRONTEND_URL || 'https://evoa.co.in').trim().replace(/^["']|["']$/g, '');
         let callbackUrl = (redirectTo || defaultFrontend).trim();
         if (!callbackUrl.includes('/auth/callback')) {
             callbackUrl = `${callbackUrl.replace(/\/$/, '')}/auth/callback`;
         }
 
-        const { data: listData, error: listErr } = await supabaseAdmin.auth.admin.listUsers({ perPage: 1000 });
-        if (listErr) {
-            throw new BadRequestException(listErr.message);
-        }
+        let user: any = null;
+        let isExistingUnconfirmed = false;
 
-        const existing = ((listData?.users || []) as any[]).find((u: any) => u.email?.toLowerCase() === normalizedEmail);
-        if (!existing) {
-            throw new BadRequestException('No account found with this email address.');
-        }
-
-        if (existing.email_confirmed_at) {
-            return {
-                success: true,
-                message: 'Your account is already verified. You can log in directly.',
-            };
-        }
-
-        const { data: linkData, error: linkErr } = await supabaseAdmin.auth.admin.generateLink({
-            type: 'magiclink',
+        // Step 1: Attempt to create user directly in Supabase
+        const { data: createData, error: createErr } = await supabaseAdmin.auth.admin.createUser({
             email: normalizedEmail,
+            password,
+            user_metadata: metadata || {},
+            email_confirm: false,
+        });
+
+        if (createErr) {
+            const isEmailExists = createErr.message?.toLowerCase().includes('already') || (createErr as any).code === 'email_exists' || (createErr as any).status === 422;
+            if (isEmailExists) {
+                // Check if user is unverified by attempting to generate magiclink / verification link
+                const { data: linkCheck, error: linkCheckErr } = await supabaseAdmin.auth.admin.generateLink({
+                    type: 'magiclink',
+                    email: normalizedEmail,
+                    options: { redirectTo: callbackUrl },
+                });
+
+                if (linkCheckErr) {
+                    throw new ConflictException('User with this email already exists and is registered. Please log in.');
+                }
+
+                if (linkCheck?.user?.email_confirmed_at) {
+                    throw new ConflictException('User is already registered and verified. Please log in.');
+                }
+
+                user = linkCheck?.user;
+                isExistingUnconfirmed = true;
+
+                // Update password and metadata for unconfirmed user
+                if (user?.id) {
+                    await supabaseAdmin.auth.admin.updateUserById(user.id, {
+                        password,
+                        user_metadata: metadata || {},
+                    });
+                }
+            } else {
+                throw new BadRequestException(createErr.message || 'Failed to create user account.');
+            }
+        } else {
+            user = createData?.user;
+        }
+
+        if (!user) {
+            throw new BadRequestException('Failed to initialize user record.');
+        }
+
+        // Step 2: Generate action verification link
+        const { data: linkData, error: linkErr } = await supabaseAdmin.auth.admin.generateLink({
+            type: isExistingUnconfirmed ? 'magiclink' : 'signup',
+            email: normalizedEmail,
+            password,
             options: { redirectTo: callbackUrl },
         });
 
@@ -260,14 +190,69 @@ export class AuthService {
 
         const actionLink = linkData.properties.action_link;
 
-        const emailSent = await this.mailService.sendVerificationEmail(normalizedEmail, actionLink);
+        // Step 3: Trigger live email delivery immediately in background (does not block HTTP response)
+        this.mailService.sendVerificationEmail(normalizedEmail, actionLink)
+            .then(() => {
+                this.logger.log(`[AuthService] Verification email successfully delivered to ${normalizedEmail}`);
+            })
+            .catch((err) => {
+                this.logger.error(`[AuthService] Verification email failed for ${normalizedEmail}: ${err?.message || err}`);
+            });
+
+        // Step 4: Return instant 200 OK (~0-1 second response time)
+        return {
+            success: true,
+            message: 'Verification email sent. Check your inbox.',
+            user: {
+                id: user.id,
+                email: user.email,
+            },
+        };
+    }
+
+    async resendVerification(resendDto: ResendVerificationDto) {
+        const { email, redirectTo } = resendDto;
+        const normalizedEmail = email.trim().toLowerCase();
+
+        const defaultFrontend = (process.env.FRONTEND_URL || 'https://evoa.co.in').trim().replace(/^["']|["']$/g, '');
+        let callbackUrl = (redirectTo || defaultFrontend).trim();
+        if (!callbackUrl.includes('/auth/callback')) {
+            callbackUrl = `${callbackUrl.replace(/\/$/, '')}/auth/callback`;
+        }
+
+        const { data: linkData, error: linkErr } = await supabaseAdmin.auth.admin.generateLink({
+            type: 'magiclink',
+            email: normalizedEmail,
+            options: { redirectTo: callbackUrl },
+        });
+
+        if (linkErr || !linkData?.properties?.action_link) {
+            if (linkErr?.message?.toLowerCase().includes('not found') || (linkErr as any)?.code === 'user_not_found') {
+                throw new BadRequestException('No account found with this email address.');
+            }
+            throw new BadRequestException(linkErr?.message || 'Failed to generate verification link.');
+        }
+
+        if (linkData?.user?.email_confirmed_at) {
+            return {
+                success: true,
+                message: 'Your account is already verified. You can log in directly.',
+            };
+        }
+
+        const actionLink = linkData.properties.action_link;
+
+        this.mailService.sendVerificationEmail(normalizedEmail, actionLink)
+            .then(() => {
+                this.logger.log(`[AuthService] Resent verification email to ${normalizedEmail}`);
+            })
+            .catch((err) => {
+                this.logger.error(`[AuthService] Resend verification email failed for ${normalizedEmail}: ${err?.message || err}`);
+            });
 
         return {
             success: true,
-            emailSent,
-            message: emailSent
-                ? 'Verification email sent! Check your inbox.'
-                : 'Verification email trigger attempted. Please check your inbox.',
+            message: 'Verification email sent! Check your inbox.',
         };
     }
 
@@ -275,20 +260,10 @@ export class AuthService {
         const { email, redirectTo } = forgotPasswordDto as any;
         const normalizedEmail = email.trim().toLowerCase();
 
-        const defaultFrontend = process.env.FRONTEND_URL || 'http://localhost:5173';
+        const defaultFrontend = (process.env.FRONTEND_URL || 'https://evoa.co.in').trim().replace(/^["']|["']$/g, '');
         let callbackUrl = (redirectTo || defaultFrontend).trim();
         if (!callbackUrl.includes('/create-new-password')) {
             callbackUrl = `${callbackUrl.replace(/\/$/, '')}/create-new-password`;
-        }
-
-        const { data: listData, error: listErr } = await supabaseAdmin.auth.admin.listUsers({ perPage: 1000 });
-        if (listErr) {
-            throw new BadRequestException(listErr.message);
-        }
-
-        const existing = ((listData?.users || []) as any[]).find((u: any) => u.email?.toLowerCase() === normalizedEmail);
-        if (!existing) {
-            throw new BadRequestException('No registered account found with this email address.');
         }
 
         const { data: linkData, error: linkErr } = await supabaseAdmin.auth.admin.generateLink({
@@ -298,19 +273,25 @@ export class AuthService {
         });
 
         if (linkErr || !linkData?.properties?.action_link) {
+            if (linkErr?.message?.toLowerCase().includes('not found') || (linkErr as any)?.code === 'user_not_found') {
+                throw new BadRequestException('No registered account found with this email address.');
+            }
             throw new BadRequestException(linkErr?.message || 'Failed to generate password reset link.');
         }
 
         const actionLink = linkData.properties.action_link;
 
-        const emailSent = await this.mailService.sendPasswordResetEmail(normalizedEmail, actionLink);
+        this.mailService.sendPasswordResetEmail(normalizedEmail, actionLink)
+            .then(() => {
+                this.logger.log(`[AuthService] Password reset email sent to ${normalizedEmail}`);
+            })
+            .catch((err) => {
+                this.logger.error(`[AuthService] Password reset email failed for ${normalizedEmail}: ${err?.message || err}`);
+            });
 
         return {
             success: true,
-            emailSent,
-            message: emailSent
-                ? 'Password reset link sent! Check your inbox.'
-                : 'Password reset email trigger attempted. Please check your inbox.',
+            message: 'Password reset link sent! Check your inbox.',
         };
     }
 

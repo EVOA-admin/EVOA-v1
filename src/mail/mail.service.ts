@@ -1,28 +1,38 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, InternalServerErrorException } from '@nestjs/common';
 import * as nodemailer from 'nodemailer';
 import * as fs from 'fs';
 import * as path from 'path';
+
+function cleanEnvVar(val: string | undefined, defaultVal = ''): string {
+  if (!val) return defaultVal;
+  let cleaned = String(val).trim();
+  if ((cleaned.startsWith('"') && cleaned.endsWith('"')) || (cleaned.startsWith("'") && cleaned.endsWith("'"))) {
+    cleaned = cleaned.slice(1, -1).trim();
+  }
+  return cleaned || defaultVal;
+}
 
 @Injectable()
 export class MailService implements OnModuleInit {
   private readonly logger = new Logger(MailService.name);
 
   async onModuleInit() {
-    this.logger.log('MailService initialized with resilient cloud delivery');
+    this.logger.log('MailService initialized with multi-candidate SMTP delivery');
   }
 
   private getSmtpPass(): string {
-    const rawPass = process.env.SMTP_PASS || '';
-    const cleanedPass = rawPass.trim().replace(/^["']|["']$/g, '');
-    if (cleanedPass) return cleanedPass;
-
+    const rawPass = process.env.SMTP_PASS || process.env.MAIL_PASS;
+    const cleaned = cleanEnvVar(rawPass);
+    if (cleaned) {
+      return cleaned;
+    }
     try {
       const envPath = path.resolve(process.cwd(), '.env');
       if (fs.existsSync(envPath)) {
         const content = fs.readFileSync(envPath, 'utf8');
-        const match = content.match(/^SMTP_PASS=(.*)$/m);
+        const match = content.match(/^(?:SMTP_PASS|MAIL_PASS)=(.*)$/m);
         if (match && match[1]) {
-          const pass = match[1].trim().replace(/^["']|["']$/g, '');
+          const pass = cleanEnvVar(match[1]);
           if (pass) {
             process.env.SMTP_PASS = pass;
             return pass;
@@ -34,32 +44,29 @@ export class MailService implements OnModuleInit {
   }
 
   private getFromAddress(): string {
-    const user = (process.env.SMTP_USER || 'admin@evoa.co.in').trim();
-    const rawFrom = (process.env.SMTP_FROM || process.env.MAIL_FROM || '').trim();
+    const user = cleanEnvVar(process.env.SMTP_USER || process.env.MAIL_USER, 'admin@evoa.co.in');
+    const rawFrom = cleanEnvVar(process.env.SMTP_FROM || process.env.MAIL_FROM);
     if (rawFrom) {
-      const cleaned = rawFrom.replace(/^["']|["']$/g, '');
-      if (cleaned.includes('<') && cleaned.includes('>')) {
-        return cleaned;
+      if (rawFrom.includes('<') && rawFrom.includes('>')) {
+        return rawFrom;
       }
+      return `"${rawFrom}" <${user}>`;
     }
     return `"EVOA Support" <${user}>`;
   }
 
   private getCandidateTransporters(): nodemailer.Transporter[] {
+    const user = cleanEnvVar(process.env.SMTP_USER || process.env.MAIL_USER, 'admin@evoa.co.in');
     const pass = this.getSmtpPass();
-    const user = (process.env.SMTP_USER || 'admin@evoa.co.in').trim();
-    const primaryHost = (process.env.SMTP_HOST || 'smtp.zoho.in').trim();
-    const primaryPort = parseInt(process.env.SMTP_PORT || '465', 10);
-    const primarySecure = process.env.SMTP_SECURE !== 'false' && primaryPort !== 587;
+    const primaryHost = cleanEnvVar(process.env.SMTP_HOST || process.env.MAIL_HOST, 'smtp.zoho.in');
+    const primaryPort = parseInt(cleanEnvVar(process.env.SMTP_PORT || process.env.MAIL_PORT, '465'), 10);
+    const primarySecure = process.env.SMTP_SECURE !== 'false' && primaryPort === 465;
 
     const configs = [
       { host: primaryHost, port: primaryPort, secure: primarySecure },
-      { host: primaryHost, port: 587, secure: false },
-      { host: 'smtppro.zoho.in', port: 465, secure: true },
+      { host: primaryHost, port: primaryPort === 465 ? 587 : 465, secure: primaryPort !== 465 },
       { host: 'smtp.zoho.in', port: 465, secure: true },
-      { host: 'smtppro.zoho.com', port: 465, secure: true },
-      { host: 'smtp.zoho.com', port: 465, secure: true },
-      { host: 'smtp.zoho.com', port: 587, secure: false },
+      { host: 'smtp.zoho.in', port: 587, secure: false },
     ];
 
     const seen = new Set<string>();
@@ -75,11 +82,10 @@ export class MailService implements OnModuleInit {
         host: c.host,
         port: c.port,
         secure: c.secure,
-        requireTLS: c.port === 587,
         auth: { user, pass },
-        connectionTimeout: 4000,
-        greetingTimeout: 4000,
-        socketTimeout: 6000,
+        connectionTimeout: 8000,
+        greetingTimeout: 8000,
+        socketTimeout: 10000,
         tls: {
           rejectUnauthorized: false,
         },
@@ -90,8 +96,9 @@ export class MailService implements OnModuleInit {
   private async dispatchEmail(mailOptions: nodemailer.SendMailOptions): Promise<boolean> {
     const pass = this.getSmtpPass();
     if (!pass) {
-      this.logger.error('Email delivery skipped: SMTP_PASS is missing in environment variables.');
-      return false;
+      const errMsg = 'Email delivery failed: SMTP_PASS is missing in environment variables.';
+      this.logger.error(errMsg);
+      throw new InternalServerErrorException(errMsg);
     }
 
     const transporters = this.getCandidateTransporters();
@@ -101,16 +108,16 @@ export class MailService implements OnModuleInit {
       const options = transporter.options as any;
       try {
         const info = await transporter.sendMail(mailOptions);
-        this.logger.log(`Email delivered to ${mailOptions.to} via ${options.host}:${options.port} [Message-ID: ${info.messageId}]`);
+        this.logger.log(`[MailService] Email delivered to ${mailOptions.to} via ${options.host}:${options.port} [Message-ID: ${info.messageId}]`);
         return true;
-      } catch (err) {
+      } catch (err: any) {
         lastErr = err;
-        this.logger.warn(`SMTP candidate ${options.host}:${options.port} (secure=${options.secure}) failed for ${mailOptions.to}: ${err.message}`);
+        this.logger.warn(`[MailService] SMTP attempt ${options.host}:${options.port} (secure=${options.secure}) failed for ${mailOptions.to}: ${err?.message || err}`);
       }
     }
 
-    this.logger.error(`All SMTP candidates failed to deliver email to ${mailOptions.to}: ${lastErr?.message || lastErr}`);
-    return false;
+    this.logger.error(`[MailService] All SMTP delivery candidates failed for ${mailOptions.to}: ${lastErr?.message || lastErr}`);
+    throw lastErr || new InternalServerErrorException('Failed to deliver email via SMTP');
   }
 
   async sendVerificationEmail(to: string, verificationLink: string): Promise<boolean> {
@@ -168,8 +175,8 @@ export class MailService implements OnModuleInit {
         html: htmlContent,
       });
     } catch (err) {
-      this.logger.error(`sendVerificationEmail error for ${to}: ${err?.message || err}`);
-      return false;
+      this.logger.error(`[MailService] sendVerificationEmail error for ${to}:`, err);
+      throw err;
     }
   }
 
@@ -228,8 +235,8 @@ export class MailService implements OnModuleInit {
         html: htmlContent,
       });
     } catch (err) {
-      this.logger.error(`sendPasswordResetEmail error for ${to}: ${err?.message || err}`);
-      return false;
+      this.logger.error(`[MailService] sendPasswordResetEmail error for ${to}:`, err);
+      throw err;
     }
   }
 }
