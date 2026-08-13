@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException, ConflictException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, UnauthorizedException, ConflictException, BadRequestException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -10,6 +10,8 @@ import { MailService } from '../mail/mail.service';
 
 @Injectable()
 export class AuthService {
+    private readonly logger = new Logger(AuthService.name);
+
     constructor(
         @InjectRepository(User)
         private readonly userRepository: Repository<User>,
@@ -124,52 +126,69 @@ export class AuthService {
             callbackUrl = `${callbackUrl.replace(/\/$/, '')}/auth/callback`;
         }
 
-        let user;
-        const { data: listData } = await supabaseAdmin.auth.admin.listUsers();
-        if (listData?.users) {
-            const existing = (listData.users as any[]).find((u: any) => u.email?.toLowerCase() === normalizedEmail);
-            if (existing) {
-                if (existing.email_confirmed_at) {
-                    throw new ConflictException('User is already registered and verified. Please log in.');
-                }
-                const { data: updated, error: updateErr } = await supabaseAdmin.auth.admin.updateUserById(
-                    existing.id,
-                    { password, user_metadata: metadata || {} }
-                );
-                if (updateErr) {
-                    throw new BadRequestException(updateErr.message);
-                }
-                user = updated.user;
-            }
-        }
+        let user: any = null;
+        let isExistingUnverified = false;
 
-        if (!user) {
-            const { data: createData, error: createErr } = await supabaseAdmin.auth.admin.createUser({
-                email: normalizedEmail,
-                password,
-                user_metadata: metadata || {},
-                email_confirm: false,
-            });
+        // Directly attempt to create user in Supabase Auth
+        const { data: createData, error: createErr } = await supabaseAdmin.auth.admin.createUser({
+            email: normalizedEmail,
+            password,
+            user_metadata: metadata || {},
+            email_confirm: false,
+        });
 
-            if (createErr || !createData?.user) {
-                throw new BadRequestException(createErr?.message || 'Failed to create user account.');
+        if (createErr) {
+            const errMsg = createErr.message?.toLowerCase() || '';
+            if (errMsg.includes('already registered') || errMsg.includes('already exists') || errMsg.includes('email_exists')) {
+                // User account already exists in Supabase Auth — check if confirmed or unconfirmed
+                const { data: listData } = await supabaseAdmin.auth.admin.listUsers();
+                const existing = ((listData?.users || []) as any[]).find((u: any) => u.email?.toLowerCase() === normalizedEmail);
+
+                if (existing) {
+                    if (existing.email_confirmed_at) {
+                        throw new ConflictException('User is already registered and verified. Please log in.');
+                    }
+                    // Existing unverified account — update password and user metadata
+                    const { data: updated, error: updateErr } = await supabaseAdmin.auth.admin.updateUserById(
+                        existing.id,
+                        { password, user_metadata: metadata || {} }
+                    );
+                    if (updateErr) {
+                        throw new BadRequestException(updateErr.message);
+                    }
+                    user = updated.user;
+                    isExistingUnverified = true;
+                } else {
+                    throw new ConflictException('User is already registered. Please log in.');
+                }
+            } else {
+                throw new BadRequestException(createErr.message || 'Failed to create user account.');
             }
+        } else {
             user = createData.user;
         }
 
-        const { data: linkData, error: linkErr } = await supabaseAdmin.auth.admin.generateLink({
-            type: 'signup',
+        // Generate verification link
+        const linkType = isExistingUnverified ? 'magiclink' : 'signup';
+        const linkPayload: any = {
+            type: linkType,
             email: normalizedEmail,
-            password,
             options: { redirectTo: callbackUrl },
-        });
+        };
+        if (!isExistingUnverified) {
+            linkPayload.password = password;
+        }
+
+        const { data: linkData, error: linkErr } = await supabaseAdmin.auth.admin.generateLink(linkPayload);
 
         if (linkErr || !linkData?.properties?.action_link) {
+            this.logger.error('Failed to generate verification link:', linkErr);
             throw new BadRequestException(linkErr?.message || 'Failed to generate verification link.');
         }
 
         const actionLink = linkData.properties.action_link;
 
+        // Deliver email via Zoho Mail with automatic multi-port/host fallback
         await this.mailService.sendVerificationEmail(normalizedEmail, actionLink);
 
         return {
