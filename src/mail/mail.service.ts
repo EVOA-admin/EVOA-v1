@@ -86,35 +86,37 @@ export class MailService implements OnModuleInit {
           <meta charset="utf-8">
           <title>Verify your EVOA Account</title>
         </head>
-        <body style="font-family: Arial, sans-serif; background-color: #060607; color: #F4F0E8; padding: 40px 20px; margin: 0;">
-          <div style="max-width: 560px; margin: 0 auto; background: #0f0f10; border: 1px solid rgba(244,240,232,0.12); padding: 36px 28px; border-radius: 8px;">
+        <body style="font-family: Arial, sans-serif; background-color: #0D1B2A; color: #E2E8F0; padding: 40px 20px; margin: 0;">
+          <div style="max-width: 540px; margin: 0 auto; background: #162032; border: 1px solid rgba(255,255,255,0.08); padding: 40px 32px; border-radius: 16px; box-shadow: 0 12px 48px rgba(0,0,0,0.5);">
             <div style="text-align: center; margin-bottom: 24px;">
-              <h1 style="font-family: 'Arial Black', sans-serif; font-size: 28px; letter-spacing: 2px; color: #F4F0E8; margin: 0;">
-                EVO<span style="color: #E8341A;">-A</span>
+              <h1 style="font-family: Arial, sans-serif; font-size: 30px; font-weight: 800; letter-spacing: 1px; color: #E2E8F0; margin: 0;">
+                EVO<span style="color: #3B82F6;">-A</span>
               </h1>
-              <p style="font-size: 11px; letter-spacing: 2px; color: rgba(244,240,232,0.4); text-transform: uppercase; margin-top: 4px;">
+              <p style="font-family: monospace; font-size: 10px; letter-spacing: 3px; color: #64748B; text-transform: uppercase; margin-top: 6px;">
                 Startup · Investor · Ecosystem
               </p>
             </div>
             
-            <h2 style="font-size: 20px; color: #F4F0E8; margin-bottom: 12px; text-align: center;">Verify Your Email Address</h2>
-            <p style="font-size: 14px; color: rgba(244,240,232,0.7); line-height: 1.6; margin-bottom: 24px; text-align: center;">
-              Welcome to EVOA! Please confirm your email address by clicking the button below to complete your registration.
-            </p>
+            <div style="text-align: center; margin-bottom: 24px;">
+              <h2 style="font-size: 22px; font-weight: 700; color: #E2E8F0; margin: 0 0 10px 0;">Verify Your Email Address</h2>
+              <p style="font-size: 14px; color: #94A3B8; line-height: 1.6; margin: 0;">
+                Welcome to EVOA! Please confirm your email address by clicking the button below to activate your account.
+              </p>
+            </div>
             
             <div style="text-align: center; margin: 32px 0;">
-              <a href="${verificationLink}" style="background-color: #E8341A; color: #060607; text-decoration: none; padding: 14px 28px; font-weight: bold; font-size: 13px; letter-spacing: 1.5px; text-transform: uppercase; display: inline-block; border-radius: 4px;">
+              <a href="${verificationLink}" style="background-color: #3B82F6; color: #FFFFFF; text-decoration: none; padding: 14px 32px; font-weight: 600; font-size: 14px; letter-spacing: 0.5px; display: inline-block; border-radius: 8px; box-shadow: 0 4px 16px rgba(59,130,246,0.3);">
                 Verify Email Address
               </a>
             </div>
             
-            <p style="font-size: 12px; color: rgba(244,240,232,0.4); line-height: 1.5; text-align: center; word-break: break-all; margin-top: 24px;">
+            <p style="font-size: 12px; color: #64748B; line-height: 1.5; text-align: center; word-break: break-all; margin-top: 24px;">
               If the button doesn't work, copy and paste this link into your browser:<br>
-              <a href="${verificationLink}" style="color: #E8341A;">${verificationLink}</a>
+              <a href="${verificationLink}" style="color: #60A5FA; text-decoration: underline;">${verificationLink}</a>
             </p>
             
-            <hr style="border: none; border-top: 1px solid rgba(244,240,232,0.1); margin: 32px 0 16px 0;">
-            <p style="font-size: 11px; color: rgba(244,240,232,0.3); text-align: center; margin: 0;">
+            <hr style="border: none; border-top: 1px solid rgba(255,255,255,0.08); margin: 32px 0 16px 0;">
+            <p style="font-size: 11px; color: #64748B; text-align: center; margin: 0;">
               If you didn't create an account with EVOA, you can safely ignore this email.
             </p>
           </div>
