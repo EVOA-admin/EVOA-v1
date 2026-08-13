@@ -96,13 +96,15 @@ export class MailService implements OnModuleInit {
     const apiKey = cleanEnvVar(process.env.BREVO_API_KEY);
     if (!apiKey) return { success: false, error: 'BREVO_API_KEY not configured' };
 
-    const fromRaw = cleanEnvVar(process.env.BREVO_FROM) || this.getFromAddress();
+    const fromRaw = cleanEnvVar(process.env.BREVO_FROM) || cleanEnvVar(process.env.SMTP_FROM) || this.getFromAddress();
     let senderName = 'EVOA';
     let senderEmail = 'admin@evoa.co.in';
     const match = fromRaw.match(/(?:"?([^"]*)"?\s*)?<([^>]+)>/);
     if (match) {
       if (match[1]) senderName = match[1].trim();
       if (match[2]) senderEmail = match[2].trim();
+    } else if (fromRaw.includes('@')) {
+      senderEmail = fromRaw.trim();
     }
 
     try {
