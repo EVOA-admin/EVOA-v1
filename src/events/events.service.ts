@@ -264,6 +264,59 @@ export class EventsService {
         return { message: 'Ticket deleted successfully.' };
     }
 
+    public isEventExpired(event: Event): boolean {
+        if (!event) return true;
+
+        if (event.isRegistrationOpen === false || event.allowBookings === false) {
+            return true;
+        }
+
+        const now = new Date();
+
+        if (event.bookingEndDate) {
+            const bookingEnd = new Date(event.bookingEndDate);
+            if (!isNaN(bookingEnd.getTime()) && now > bookingEnd) {
+                return true;
+            }
+        }
+
+        const dateStr = event.endDate || event.startDate;
+        if (dateStr) {
+            let eventEndTimestamp: number | null = null;
+
+            if (dateStr.includes('T')) {
+                const parsed = new Date(dateStr);
+                if (!isNaN(parsed.getTime())) {
+                    eventEndTimestamp = parsed.getTime();
+                }
+            } else if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr.trim())) {
+                const timeStr = event.endTime || event.startTime || '23:59:59';
+                const fullStr = `${dateStr.trim()}T${timeStr.includes(':') ? timeStr : '23:59:59'}`;
+                const parsed = new Date(fullStr);
+                if (!isNaN(parsed.getTime())) {
+                    eventEndTimestamp = parsed.getTime();
+                } else {
+                    const fallbackDate = new Date(`${dateStr.trim()}T23:59:59.999Z`);
+                    if (!isNaN(fallbackDate.getTime())) {
+                        eventEndTimestamp = fallbackDate.getTime();
+                    }
+                }
+            } else {
+                const parsed = new Date(dateStr);
+                if (!isNaN(parsed.getTime())) {
+                    parsed.setHours(23, 59, 59, 999);
+                    eventEndTimestamp = parsed.getTime();
+                }
+            }
+
+            if (eventEndTimestamp !== null && now.getTime() > eventEndTimestamp) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     // ── DIGITAL TICKET SYSTEM ──────────────────────────────────────────────────
 
     async bookTicket(user: User, dto: BookTicketDto): Promise<UserEventTicket> {
@@ -293,6 +346,11 @@ export class EventsService {
                 });
             }
             return existingTicket;
+        }
+
+        // Prevent new registrations for expired events
+        if (this.isEventExpired(event)) {
+            throw new BadRequestException('Registration for this event has expired and is now closed.');
         }
 
         // Generate unique ticket code: TKT-EVOA-XXXXXX

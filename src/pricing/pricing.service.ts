@@ -459,6 +459,9 @@ export class PricingService {
         let event: Event | null = null;
         if (eventId) {
             event = await this.eventRepo.findOne({ where: { id: eventId } });
+            if (event && this.eventsService.isEventExpired(event)) {
+                throw new BadRequestException('Registration for this event has expired and is now closed.');
+            }
         }
 
         const resolvedEventType = eventTypeOverride || event?.eventType || EventType.EVENT_WITH_SUBSCRIPTION;
