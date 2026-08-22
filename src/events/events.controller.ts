@@ -30,6 +30,14 @@ export class EventsController {
         return this.eventsService.bookTicket(user, dto);
     }
 
+    @Post('resend-pass/:ticketId')
+    @UseGuards(SupabaseAuthGuard)
+    @ApiBearerAuth()
+    @ApiOperation({ summary: 'Resend official Event Pass email with PDF attachment' })
+    async resendPass(@CurrentUser() user: User, @Param('ticketId') ticketId: string) {
+        return this.eventsService.resendTicketPass(user, ticketId);
+    }
+
     @Get('my-tickets')
     @UseGuards(SupabaseAuthGuard)
     @ApiBearerAuth()

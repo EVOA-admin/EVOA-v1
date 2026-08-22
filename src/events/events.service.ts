@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Event, EventStatus } from './entities/event.entity';
@@ -12,9 +12,13 @@ import { UpdateTicketDto } from './dto/update-ticket.dto';
 import { BookTicketDto } from './dto/book-ticket.dto';
 import { randomBytes } from 'crypto';
 import { AdminRole } from '../admin/entities/admin.entity';
+import { MailService } from '../mail/mail.service';
+import { EventPassPdfService } from './event-pass-pdf.service';
 
 @Injectable()
 export class EventsService {
+    private readonly logger = new Logger(EventsService.name);
+
     constructor(
         @InjectRepository(Event)
         private readonly eventRepo: Repository<Event>,
@@ -24,6 +28,8 @@ export class EventsService {
         private readonly userTicketRepo: Repository<UserEventTicket>,
         @InjectRepository(User)
         private readonly userRepo: Repository<User>,
+        private readonly mailService: MailService,
+        private readonly eventPassPdfService: EventPassPdfService,
     ) {}
 
     private checkEventAuthorization(admin: any, event: Event) {
@@ -269,13 +275,23 @@ export class EventsService {
         ];
         if (user.supabaseUserId) whereConditions.push({ userId: user.supabaseUserId, eventId: event.id });
         if (user.email) whereConditions.push({ userEmail: user.email, eventId: event.id });
+        if (dto.userEmail && dto.userEmail !== user.email) whereConditions.push({ userEmail: dto.userEmail, eventId: event.id });
+        if (dto.orderId) whereConditions.push({ orderId: dto.orderId });
+        if (dto.paymentId) whereConditions.push({ paymentId: dto.paymentId });
 
         const existingTicket = await this.userTicketRepo.findOne({
             where: whereConditions,
             relations: ['event'],
+            order: { createdAt: 'ASC' },
         });
 
         if (existingTicket) {
+            // If email was never sent for this ticket (or failed previously), trigger dispatch now
+            if (existingTicket.emailStatus !== 'SENT') {
+                this.sendEventPassEmailForTicket(existingTicket, true).catch((err) => {
+                    this.logger.warn(`[EventsService] Background Event Pass email dispatch failed for ${existingTicket.ticketCode}: ${err?.message || err}`);
+                });
+            }
             return existingTicket;
         }
 
@@ -308,7 +324,7 @@ export class EventsService {
         );
 
         const userName = resolvedName;
-        const userEmail = dto.userEmail || user?.email || '';
+        const userEmail = (dto.userEmail && dto.userEmail.trim()) ? dto.userEmail.trim() : (user?.email && user.email.trim()) ? user.email.trim() : '';
         const userRole = dto.userRole || user?.role || 'user';
 
         // Secure QR payload encoding unique identifiers
@@ -334,7 +350,190 @@ export class EventsService {
 
         const saved = await this.userTicketRepo.save(userTicket);
         saved.event = event;
+
+        // Trigger Event Pass PDF generation and Brevo transactional email delivery in background
+        this.sendEventPassEmailForTicket(saved, true).catch((err) => {
+            this.logger.warn(`[EventsService] Background Event Pass email dispatch failed for ${saved.ticketCode}: ${err?.message || err}`);
+        });
+
         return saved;
+    }
+
+    /**
+     * Idempotent Event Pass generator and email dispatcher.
+     * Generates a vector PDF ticket and dispatches it via Brevo / multi-provider mail service.
+     */
+    async sendEventPassEmailForTicket(ticketOrId: string | UserEventTicket, forceResend = false): Promise<{ success: boolean; alreadySent?: boolean; error?: string }> {
+        try {
+            let ticket: UserEventTicket | null = null;
+            const ticketId = typeof ticketOrId === 'string' ? ticketOrId : ticketOrId?.id;
+
+            if (ticketId) {
+                ticket = await this.userTicketRepo.findOne({
+                    where: { id: ticketId },
+                    relations: ['event', 'user'],
+                });
+            }
+            if (!ticket && typeof ticketOrId === 'object') {
+                ticket = ticketOrId;
+            }
+
+            if (!ticket) {
+                this.logger.warn(`[EventsService] Cannot send event pass: Ticket not found.`);
+                return { success: false, error: 'Ticket not found' };
+            }
+
+            // Idempotency: Prevent duplicate emails if already sent unless explicitly requested
+            if (!forceResend && ticket.emailStatus === 'SENT') {
+                this.logger.log(`[EventsService] Event Pass email already sent for ticket ${ticket.ticketCode} at ${ticket.emailSentAt}. Skipping duplicate.`);
+                return { success: true, alreadySent: true };
+            }
+
+            // Load user & event if not already populated
+            if (!ticket.user && ticket.userId) {
+                const fetchedUser = await this.userRepo.findOne({ where: { id: ticket.userId } }) ||
+                                   await this.userRepo.findOne({ where: { supabaseUserId: ticket.userId } });
+                if (fetchedUser) ticket.user = fetchedUser;
+            }
+            if (!ticket.event && ticket.eventId) {
+                const fetchedEvent = await this.eventRepo.findOne({ where: { id: ticket.eventId } });
+                if (fetchedEvent) ticket.event = fetchedEvent;
+            }
+
+            const user = ticket.user as any;
+            const event = ticket.event;
+
+            if (!event) {
+                this.logger.warn(`[EventsService] Cannot send event pass for ${ticket.ticketCode}: Event details missing.`);
+                return { success: false, error: 'Event details missing' };
+            }
+
+            // Resolve attendee name
+            const rawName = ticket.userName || user?.fullName || user?.name || user?.founderName || user?.companyName || user?.username;
+            const isEmail = (str: string) => typeof str === 'string' && str.includes('@');
+            let attendeeName = rawName && !isEmail(rawName) ? rawName.trim() : '';
+            const attendeeEmail = (ticket.userEmail && ticket.userEmail.trim()) || (user?.email && user.email.trim()) || '';
+
+            if (!attendeeName && attendeeEmail && isEmail(attendeeEmail)) {
+                const handle = attendeeEmail.split('@')[0].replace(/[._-]/g, ' ');
+                attendeeName = handle.replace(/\b\w/g, (c) => c.toUpperCase());
+            }
+            if (!attendeeName) {
+                attendeeName = 'Attendee';
+            }
+
+            if (!attendeeEmail) {
+                this.logger.warn(`[EventsService] Cannot send event pass for ${ticket.ticketCode}: No valid attendee email found.`);
+                await this.userTicketRepo.update({ id: ticket.id }, { emailStatus: 'FAILED' });
+                return { success: false, error: 'No attendee email found' };
+            }
+
+            // Format event date & time
+            const eventTitle = event.collaborationName || event.title || 'EVOA Exclusive Event';
+            let formattedDate = 'Date Announced Soon';
+            if (event.startDate) {
+                try {
+                    formattedDate = new Date(event.startDate).toLocaleDateString('en-IN', {
+                        weekday: 'short',
+                        day: 'numeric',
+                        month: 'short',
+                        year: 'numeric',
+                    });
+                } catch (_) {
+                    formattedDate = String(event.startDate);
+                }
+            }
+
+            const formattedTime = event.startTime ? `${event.startTime} ${event.timezone || 'IST'}` : 'Time TBA';
+            const eventVenue = event.venueName || event.address || event.meetingUrl || 'Venue Announced Soon';
+            const eventCity = event.city || event.state || '';
+            const userRole = (ticket.userRole || user?.role || 'ATTENDEE').toUpperCase();
+
+            // 1. Generate high-quality vector PDF Event Pass
+            const pdfBuffer = await this.eventPassPdfService.generatePassPdf({
+                ticketCode: ticket.ticketCode,
+                userName: attendeeName,
+                userEmail: attendeeEmail,
+                userRole,
+                eventTitle,
+                eventDate: formattedDate,
+                eventTime: formattedTime,
+                eventVenue,
+                eventCity,
+                orderId: ticket.orderId || undefined,
+                paymentId: ticket.paymentId || undefined,
+                price: Number(ticket.price || 0),
+                qrCodeData: ticket.qrCodeData || undefined,
+            });
+
+            // 2. Dispatch email with PDF attachment via Brevo
+            await this.mailService.sendEventPassEmail({
+                to: attendeeEmail,
+                attendeeName,
+                eventTitle,
+                ticketCode: ticket.ticketCode,
+                eventDate: formattedDate,
+                eventTime: formattedTime,
+                eventVenue,
+                userRole,
+                orderId: ticket.orderId || undefined,
+                paymentId: ticket.paymentId || undefined,
+                price: Number(ticket.price || 0),
+                pdfBuffer,
+            });
+
+            // 3. Mark email as SENT with timestamp
+            await this.userTicketRepo.update(
+                { id: ticket.id },
+                {
+                    emailStatus: 'SENT',
+                    emailSentAt: new Date(),
+                },
+            );
+
+            this.logger.log(`[EventsService] Event Pass email successfully sent and recorded for ticket ${ticket.ticketCode} to ${attendeeEmail}`);
+            return { success: true };
+        } catch (err: any) {
+            this.logger.error(`[EventsService] Failed to generate/send event pass email for ticket: ${err?.message || err}`);
+            try {
+                const ticketId = typeof ticketOrId === 'string' ? ticketOrId : ticketOrId?.id;
+                if (ticketId) {
+                    await this.userTicketRepo.update({ id: ticketId }, { emailStatus: 'FAILED' });
+                }
+            } catch (_) { /* ignore DB update error */ }
+            return { success: false, error: err?.message || 'Email delivery failed' };
+        }
+    }
+
+    /**
+     * Resend Event Pass email for a ticket (accessible by ticket owner or admin).
+     */
+    async resendTicketPass(user: User, ticketId: string) {
+        const ticket = await this.userTicketRepo.findOne({
+            where: { id: ticketId },
+            relations: ['event', 'user'],
+        });
+
+        if (!ticket) {
+            throw new NotFoundException(`Ticket not found.`);
+        }
+
+        // Authorization check: User must own the ticket or be admin
+        const isAdmin = user.role === 'admin' || (user as any).adminRole;
+        if (!isAdmin && ticket.userId !== user.id && ticket.userEmail !== user.email) {
+            throw new ForbiddenException('You do not have permission to resend this ticket pass.');
+        }
+
+        const result = await this.sendEventPassEmailForTicket(ticket, true);
+        if (!result.success) {
+            throw new BadRequestException(result.error || 'Failed to dispatch Event Pass email. Please try again.');
+        }
+
+        return {
+            success: true,
+            message: 'Event Pass email dispatched successfully.',
+            ticketCode: ticket.ticketCode,
+        };
     }
 
     async getUserTicketForEvent(user: User, eventId: string): Promise<UserEventTicket | null> {
@@ -351,7 +550,7 @@ export class EventsService {
         return this.userTicketRepo.findOne({
             where: whereConditions,
             relations: ['event'],
-            order: { createdAt: 'DESC' },
+            order: { createdAt: 'ASC' },
         });
     }
 
@@ -369,18 +568,19 @@ export class EventsService {
         const tickets = await this.userTicketRepo.find({
             where: whereConditions,
             relations: ['event'],
-            order: { createdAt: 'DESC' },
+            order: { createdAt: 'ASC' },
         });
 
-        // Deduplicate tickets by ticketCode or id to ensure clean counts
-        const ticketMap = new Map<string, UserEventTicket>();
+        // Deduplicate tickets by eventId so each user has strictly ONE canonical ticket per event (earliest created)
+        const eventTicketMap = new Map<string, UserEventTicket>();
         for (const t of tickets) {
-            const key = t.ticketCode || t.id;
-            if (key && !ticketMap.has(key)) {
-                ticketMap.set(key, t);
+            const eId = t.eventId || t.event?.id;
+            const key = eId ? `event_${eId}` : (t.ticketCode || t.id);
+            if (key && !eventTicketMap.has(key)) {
+                eventTicketMap.set(key, t);
             }
         }
-        return Array.from(ticketMap.values());
+        return Array.from(eventTicketMap.values());
     }
 
     async getTicketByCode(ticketCode: string): Promise<UserEventTicket> {
@@ -436,6 +636,8 @@ export class EventsService {
                 paymentStatus,
                 orderId: ut.orderId || null,
                 paymentId: ut.paymentId || null,
+                emailStatus: ut.emailStatus || 'PENDING',
+                emailSentAt: ut.emailSentAt || null,
             };
         });
     }

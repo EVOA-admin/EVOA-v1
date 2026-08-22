@@ -6,11 +6,13 @@ import { PricingOrder } from './entities/pricing-order.entity';
 import { User } from '../users/entities/user.entity';
 import { Event } from '../events/entities/event.entity';
 import { AuthGuardModule } from '../auth/auth-guard.module';
+import { EventsModule } from '../events/events.module';
 
 @Module({
     imports: [
         TypeOrmModule.forFeature([PricingOrder, User, Event]),
         AuthGuardModule,
+        EventsModule,
     ],
     controllers: [PricingController],
     providers: [PricingService],

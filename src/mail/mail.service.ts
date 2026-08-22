@@ -58,24 +58,41 @@ export class MailService implements OnModuleInit {
     return `"EVOA Support" <${user}>`;
   }
 
-  private async sendViaResend(to: string, subject: string, html: string): Promise<{ success: boolean; id?: string; error?: string }> {
+  private async sendViaResend(
+    to: string,
+    subject: string,
+    html: string,
+    attachments?: Array<{ filename: string; content: Buffer | string; contentType?: string }>,
+  ): Promise<{ success: boolean; id?: string; error?: string }> {
     const apiKey = cleanEnvVar(process.env.RESEND_API_KEY);
     if (!apiKey) return { success: false, error: 'RESEND_API_KEY not configured' };
 
     const from = cleanEnvVar(process.env.RESEND_FROM) || this.getFromAddress();
+
+    const formattedAttachments = attachments?.map((att) => ({
+      filename: att.filename,
+      content: Buffer.isBuffer(att.content) ? att.content.toString('base64') : att.content,
+    }));
+
     try {
+      const payload: any = {
+        from,
+        to: [to],
+        subject,
+        html,
+      };
+
+      if (formattedAttachments && formattedAttachments.length > 0) {
+        payload.attachments = formattedAttachments;
+      }
+
       const res = await fetch('https://api.resend.com/emails', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          from,
-          to: [to],
-          subject,
-          html,
-        }),
+        body: JSON.stringify(payload),
       });
 
       const body = await res.json().catch(() => ({}));
@@ -92,7 +109,12 @@ export class MailService implements OnModuleInit {
     }
   }
 
-  private async sendViaBrevo(to: string, subject: string, html: string): Promise<{ success: boolean; id?: string; error?: string }> {
+  private async sendViaBrevo(
+    to: string,
+    subject: string,
+    html: string,
+    attachments?: Array<{ filename: string; content: Buffer | string; contentType?: string }>,
+  ): Promise<{ success: boolean; id?: string; error?: string }> {
     const apiKey = cleanEnvVar(process.env.BREVO_API_KEY);
     if (!apiKey) return { success: false, error: 'BREVO_API_KEY not configured' };
 
@@ -107,7 +129,23 @@ export class MailService implements OnModuleInit {
       senderEmail = fromRaw.trim();
     }
 
+    const formattedAttachments = attachments?.map((att) => ({
+      name: att.filename,
+      content: Buffer.isBuffer(att.content) ? att.content.toString('base64') : att.content,
+    }));
+
     try {
+      const payload: any = {
+        sender: { name: senderName, email: senderEmail },
+        to: [{ email: to }],
+        subject,
+        htmlContent: html,
+      };
+
+      if (formattedAttachments && formattedAttachments.length > 0) {
+        payload.attachment = formattedAttachments;
+      }
+
       const res = await fetch('https://api.brevo.com/v3/smtp/email', {
         method: 'POST',
         headers: {
@@ -115,12 +153,7 @@ export class MailService implements OnModuleInit {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
         },
-        body: JSON.stringify({
-          sender: { name: senderName, email: senderEmail },
-          to: [{ email: to }],
-          subject,
-          htmlContent: html,
-        }),
+        body: JSON.stringify(payload),
       });
 
       const body = await res.json().catch(() => ({}));
@@ -176,18 +209,24 @@ export class MailService implements OnModuleInit {
     );
   }
 
-  private async dispatchEmail(mailOptions: { from?: string; to: string; subject: string; html: string }): Promise<boolean> {
+  private async dispatchEmail(mailOptions: {
+    from?: string;
+    to: string;
+    subject: string;
+    html: string;
+    attachments?: Array<{ filename: string; content: Buffer | string; contentType?: string }>;
+  }): Promise<boolean> {
     const to = Array.isArray(mailOptions.to) ? mailOptions.to[0] : String(mailOptions.to);
 
     // 1. Try Resend HTTPS REST API (Port 443 - never blocked by cloud hosts like Render)
     if (cleanEnvVar(process.env.RESEND_API_KEY)) {
-      const res = await this.sendViaResend(to, mailOptions.subject, mailOptions.html);
+      const res = await this.sendViaResend(to, mailOptions.subject, mailOptions.html, mailOptions.attachments);
       if (res.success) return true;
     }
 
     // 2. Try Brevo HTTPS REST API (Port 443 - never blocked)
     if (cleanEnvVar(process.env.BREVO_API_KEY)) {
-      const res = await this.sendViaBrevo(to, mailOptions.subject, mailOptions.html);
+      const res = await this.sendViaBrevo(to, mailOptions.subject, mailOptions.html, mailOptions.attachments);
       if (res.success) return true;
     }
 
@@ -202,6 +241,12 @@ export class MailService implements OnModuleInit {
     const transporters = this.getCandidateTransporters();
     let lastErr: any = null;
 
+    const nodemailerAttachments = mailOptions.attachments?.map((att) => ({
+      filename: att.filename,
+      content: Buffer.isBuffer(att.content) ? att.content : Buffer.from(att.content, 'base64'),
+      contentType: att.contentType || 'application/pdf',
+    }));
+
     for (const transporter of transporters) {
       const options = transporter.options as any;
       try {
@@ -210,6 +255,7 @@ export class MailService implements OnModuleInit {
           to: mailOptions.to,
           subject: mailOptions.subject,
           html: mailOptions.html,
+          attachments: nodemailerAttachments,
         });
         this.logger.log(`[MailService] Email delivered to ${mailOptions.to} via SMTP ${options.host}:${options.port} [Message-ID: ${info.messageId}]`);
         return true;
@@ -323,14 +369,162 @@ export class MailService implements OnModuleInit {
         </html>
       `;
 
-      return await this.dispatchEmail({
+      await this.dispatchEmail({
         from,
         to,
         subject: 'Verify your EVOA account',
         html: htmlContent,
       });
-    } catch (err) {
-      this.logger.error(`[MailService] sendVerificationEmail error for ${to}:`, err);
+      this.logger.log(`[MailService] Verification email dispatched to ${to}`);
+      return true;
+    } catch (err: any) {
+      this.logger.error(`[MailService] Failed to send verification email to ${to}: ${err.message}`);
+      throw err;
+    }
+  }
+
+  async sendEventPassEmail(params: {
+    to: string;
+    attendeeName: string;
+    eventTitle: string;
+    ticketCode: string;
+    eventDate?: string;
+    eventTime?: string;
+    eventVenue?: string;
+    userRole?: string;
+    orderId?: string;
+    paymentId?: string;
+    price?: number;
+    pdfBuffer: Buffer;
+  }): Promise<boolean> {
+    const {
+      to,
+      attendeeName,
+      eventTitle,
+      ticketCode,
+      eventDate = 'Date Announced Soon',
+      eventTime = 'Time TBA',
+      eventVenue = 'Venue Details Announced Soon',
+      userRole = 'ATTENDEE',
+      pdfBuffer,
+    } = params;
+
+    const subject = `Your Event Pass for ${eventTitle} – EVOA`;
+    const from = this.getFromAddress();
+    const roleBadge = userRole.toUpperCase();
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Your Event Pass for ${eventTitle}</title>
+      </head>
+      <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #F8FAFC; color: #0F172A; padding: 40px 20px; margin: 0;">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width: 600px; margin: 0 auto; background-color: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 16px; box-shadow: 0 4px 24px rgba(15, 23, 42, 0.06); overflow: hidden;">
+          <tr>
+            <td style="padding: 40px 36px;">
+              <!-- Brand Header -->
+              <div style="text-align: center; margin-bottom: 24px;">
+                <h1 style="font-size: 30px; font-weight: 800; letter-spacing: 0.5px; color: #0F172A; margin: 0;">
+                  EVO<span style="color: #2563EB;">-A</span>
+                </h1>
+                <p style="font-family: 'SF Mono', Menlo, Consolas, Monaco, monospace; font-size: 10px; letter-spacing: 2.5px; color: #64748B; text-transform: uppercase; margin: 6px 0 0 0;">
+                  Startup · Investor · Ecosystem
+                </p>
+              </div>
+
+              <!-- Main Heading -->
+              <div style="text-align: center; margin-bottom: 24px;">
+                <div style="display: inline-block; background-color: #DCFCE7; color: #166534; font-weight: 700; font-size: 12px; letter-spacing: 0.5px; text-transform: uppercase; padding: 6px 14px; border-radius: 20px; margin-bottom: 12px;">
+                  ✓ Payment & Registration Confirmed
+                </div>
+                <h2 style="font-size: 22px; font-weight: 700; color: #0F172A; margin: 0 0 8px 0;">
+                  Your Event Pass is Ready!
+                </h2>
+                <p style="font-size: 15px; color: #475569; line-height: 1.6; margin: 0;">
+                  Hi <strong>${attendeeName}</strong>, thank you for registering. Your ticket purchase for <strong>${eventTitle}</strong> has been successfully confirmed.
+                </p>
+              </div>
+
+              <!-- Event Details Box -->
+              <div style="background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 12px; padding: 22px; margin: 24px 0;">
+                <table width="100%" cellspacing="0" cellpadding="0" style="font-size: 14px;">
+                  <tr>
+                    <td style="padding-bottom: 12px; color: #64748B; font-weight: 600; width: 35%;">Event:</td>
+                    <td style="padding-bottom: 12px; color: #0F172A; font-weight: 700;">${eventTitle}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding-bottom: 12px; color: #64748B; font-weight: 600;">Pass Code:</td>
+                    <td style="padding-bottom: 12px; font-family: monospace; font-size: 15px; color: #2563EB; font-weight: 700;">${ticketCode}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding-bottom: 12px; color: #64748B; font-weight: 600;">Access Tier:</td>
+                    <td style="padding-bottom: 12px; color: #0F172A; font-weight: 600;">${roleBadge}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding-bottom: 12px; color: #64748B; font-weight: 600;">Date & Time:</td>
+                    <td style="padding-bottom: 12px; color: #0F172A; font-weight: 600;">${eventDate} • ${eventTime}</td>
+                  </tr>
+                  <tr>
+                    <td style="color: #64748B; font-weight: 600;">Venue:</td>
+                    <td style="color: #0F172A; font-weight: 600;">${eventVenue}</td>
+                  </tr>
+                </table>
+              </div>
+
+              <!-- Pass Attachment Notice (Blue Callout) -->
+              <div style="background-color: #EFF6FF; border: 1px solid #BFDBFE; border-radius: 10px; padding: 16px 18px; margin-bottom: 24px;">
+                <p style="font-size: 14px; font-weight: 700; color: #1E40AF; margin: 0 0 4px 0;">
+                  📎 Official Event Pass Attached (PDF)
+                </p>
+                <p style="font-size: 13px; color: #1E3A8A; line-height: 1.5; margin: 0;">
+                  We have attached your official vector <strong>Event Pass (PDF)</strong> containing your unique QR entry code to this email. Please download or save the PDF on your device to show at the check-in desk at the entrance.
+                </p>
+              </div>
+
+              <!-- Security Notice -->
+              <div style="background-color: #F1F5F9; border-radius: 8px; padding: 12px 16px; margin-bottom: 24px;">
+                <p style="font-size: 12px; color: #64748B; line-height: 1.5; margin: 0; text-align: center;">
+                  🔒 This pass is uniquely registered to <strong>${attendeeName}</strong> (${to}) and is non-transferable.
+                </p>
+              </div>
+
+              <!-- Footer -->
+              <div style="text-align: center; border-top: 1px solid #E2E8F0; padding-top: 20px;">
+                <p style="font-size: 12px; color: #94A3B8; margin: 0;">
+                  Questions or need assistance? Contact our support team at <a href="mailto:admin@evoa.co.in" style="color: #2563EB; text-decoration: none;">admin@evoa.co.in</a>.
+                </p>
+                <p style="font-size: 11px; color: #CBD5E1; margin: 8px 0 0 0;">
+                  © ${new Date().getFullYear()} EVOA Ecosystem. All rights reserved.
+                </p>
+              </div>
+            </td>
+          </tr>
+        </table>
+      </body>
+      </html>
+    `;
+
+    try {
+      await this.dispatchEmail({
+        from,
+        to,
+        subject,
+        html: htmlContent,
+        attachments: [
+          {
+            filename: `EVOA_Pass_${ticketCode}.pdf`,
+            content: pdfBuffer,
+            contentType: 'application/pdf',
+          },
+        ],
+      });
+      this.logger.log(`[MailService] Event Pass email successfully sent to ${to} for event "${eventTitle}" [Pass: ${ticketCode}]`);
+      return true;
+    } catch (err: any) {
+      this.logger.error(`[MailService] Failed to send Event Pass email to ${to}: ${err?.message || err}`);
       throw err;
     }
   }

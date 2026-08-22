@@ -1,6 +1,6 @@
 import {
     Entity, PrimaryGeneratedColumn, Column,
-    CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn, Index,
+    CreateDateColumn, UpdateDateColumn, ManyToOne, JoinColumn, Index, AfterLoad,
 } from 'typeorm';
 import { Event } from './event.entity';
 import { User } from '../../users/entities/user.entity';
@@ -51,9 +51,25 @@ export class UserEventTicket {
     @Column({ name: 'qr_code_data', type: 'text' })
     qrCodeData: string;
 
+    @Column({
+        name: 'email_status',
+        type: 'varchar',
+        length: 20,
+        default: 'PENDING',
+    })
+    emailStatus: 'PENDING' | 'SENT' | 'FAILED';
+
+    @Column({ name: 'email_sent_at', type: 'timestamp with time zone', nullable: true })
+    emailSentAt: Date | null;
+
     @CreateDateColumn({ name: 'created_at' })
     createdAt: Date;
 
     @UpdateDateColumn({ name: 'updated_at' })
     updatedAt: Date;
+
+    @AfterLoad()
+    populateSnakeCaseAlias() {
+        (this as any).ticket_code = this.ticketCode;
+    }
 }

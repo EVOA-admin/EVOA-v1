@@ -8,6 +8,7 @@ import { Event, EventType } from '../events/entities/event.entity';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { VerifyPaymentDto } from './dto/verify-payment.dto';
 import { hasActivePremiumAccess } from '../users/user-access.util';
+import { EventsService } from '../events/events.service';
 
 type PricingPayload = {
     startups: {
@@ -72,6 +73,7 @@ export class PricingService {
         private readonly userRepository: Repository<User>,
         @InjectRepository(Event)
         private readonly eventRepo: Repository<Event>,
+        private readonly eventsService: EventsService,
     ) { }
 
     private readonly plans: Record<CreateOrderDto['planType'], PlanConfig> = {
@@ -416,12 +418,31 @@ export class PricingService {
             await this.userRepository.update({ id: freshUser.id }, userUpdate);
         }
 
+        // If this payment was for an event, automatically book ticket and trigger Event Pass email
+        let bookedTicket: any = null;
+        if (order.eventId) {
+            try {
+                bookedTicket = await this.eventsService.bookTicket(freshUser, {
+                    eventId: order.eventId,
+                    price: order.amountPaise ? order.amountPaise / 100 : 0,
+                    orderId: order.razorpayOrderId,
+                    paymentId: dto.razorpayPaymentId,
+                    userName: freshUser.fullName || (freshUser as any).name || (freshUser as any).username || '',
+                    userEmail: freshUser.email || '',
+                    userRole: freshUser.role || 'ATTENDEE',
+                });
+            } catch (ticketErr: any) {
+                this.logger.warn(`[PricingService] Failed to book ticket during payment verification: ${ticketErr?.message || ticketErr}`);
+            }
+        }
+
         return {
             success: true,
             message: isEventOnly
                 ? 'Event ticket purchased successfully.'
                 : 'Payment verified successfully. Subscription activated.',
             planType: dto.planType,
+            ticket: bookedTicket,
             subscriptionStatus: SubscriptionStatus.ACTIVE,
             subscriptionStartDate: isEventOnly ? undefined : subscriptionStartDate,
             subscriptionEndDate: isEventOnly ? undefined : subscriptionEndDate,
